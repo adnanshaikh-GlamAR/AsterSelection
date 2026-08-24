@@ -1,4 +1,4 @@
-export const assetCacheVersion = "2026-07-22-ribble-assets-v5";
+export const assetCacheVersion = "2026-08-24-aster-selection-v2";
 
 export function appendAssetVersion(url: string) {
   const separator = url.includes("?") ? "&" : "?";

@@ -1,9 +1,9 @@
-# Ribble 3D Configurator
+# Aster Collection
 
-Interactive Fynd GlamAR 3D configurator for the Ribble New Ultra-Road cycle.
+Interactive 3D configurator project for the Aster Selection designer floor lamp collection.
 
-Live site:
-https://adnanshaikh-glamar.github.io/ribble3Dconfigurator/
+This project was cloned from the Ribble configurator into its own isolated folder.
+All Aster work should happen here, not in the Ribble project.
 
 ## Local Development
 
@@ -20,7 +20,9 @@ npm run build
 npm run build:pages
 ```
 
+For GitHub Pages, the static build uses `/AsterSelection/` as the base path.
+
 ## Deployment
 
-The repository includes a GitHub Pages workflow at `.github/workflows/pages.yml`.
-Every push to `main` builds the static viewer and deploys it to GitHub Pages.
+This project is pushed to the Aster Selection repository. Keep all future edits
+inside this Aster workspace so the original Ribble project remains unchanged.

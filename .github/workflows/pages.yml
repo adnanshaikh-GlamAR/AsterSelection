@@ -36,7 +36,7 @@ jobs:
       - name: Build static app
         run: npm run build:pages
         env:
-          GITHUB_PAGES_BASE: /ribble3Dconfigurator/
+          GITHUB_PAGES_BASE: /AsterSelection/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
