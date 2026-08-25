@@ -650,7 +650,7 @@ const lampModelUrlsByProductColorAndHeight: Partial<
 const homeSceneModelUrls: Record<HomeSceneId, string> = {
   "scene-01": publicAsset("models/home/home03.glb"),
 };
-const homeSceneCornerLampPosition = new THREE.Vector3(2.34, 0, -2.58);
+const homeSceneCornerLampPosition = new THREE.Vector3(2.12, 0, -1.88);
 const homeSceneCornerLampFloorClearance = 0;
 const homeSceneCornerLampFallbackFloorLift = 0.165;
 const homeSceneCornerLampRotationY = -0.15;
