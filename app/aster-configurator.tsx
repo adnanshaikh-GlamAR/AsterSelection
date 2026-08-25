@@ -618,8 +618,8 @@ const publicAsset = (path: string, options: { version?: boolean } = {}) => {
 };
 const homeSceneHdriAsset: HdriAsset = {
   kind: "hdr",
-  name: "default.hdr",
-  url: publicAsset("hdri/home/default.hdr"),
+  name: "studio_country_hall_1k.hdr",
+  url: publicAsset("hdri/home/studio_country_hall_1k.hdr"),
 };
 const hdriPresets: HdriPreset[] = [
   {
