@@ -675,6 +675,7 @@ const startupCameraDistance = 4.85;
 const startupCameraX = 0.86;
 const mobileStartupCameraX = 0;
 const mobileCameraBreakpoint = 900;
+const maxProductCompositionShiftRatio = 0.26;
 const startupCameraHeightOffset = 0.48;
 const startupLookHeightOffset = 0.02;
 const productViewportFit = 2;
@@ -711,6 +712,62 @@ function getEffectivePixelRatio(pixelRatio: number, viewportWidth?: number) {
         : 2;
 
   return Math.max(1, Math.min(requestedPixelRatio, devicePixelRatio, viewportCap));
+}
+
+function getProductCompositionShiftRatio(container: HTMLElement) {
+  const width = container.clientWidth || 1;
+
+  if (width <= mobileCameraBreakpoint) {
+    return 0;
+  }
+
+  const shell = container.closest(".configurator-shell");
+  const panel = shell?.querySelector(".control-panel") as HTMLElement | null;
+
+  if (!panel) {
+    return 0;
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  const panelOverlapsViewer =
+    panelRect.width > 0 &&
+    panelRect.height > 0 &&
+    panelRect.left > containerRect.left + width * 0.48 &&
+    panelRect.left < containerRect.right &&
+    panelRect.top < containerRect.bottom &&
+    panelRect.bottom > containerRect.top;
+
+  if (!panelOverlapsViewer) {
+    return 0;
+  }
+
+  const visibleWidth = THREE.MathUtils.clamp(
+    panelRect.left - containerRect.left,
+    width * 0.45,
+    width,
+  );
+  const desiredOriginX = visibleWidth * 0.5;
+  const shiftPx = Math.max(0, width * 0.5 - desiredOriginX);
+
+  return THREE.MathUtils.clamp(shiftPx / width, 0, maxProductCompositionShiftRatio);
+}
+
+function applyCameraComposition(
+  camera: THREE.PerspectiveCamera,
+  container: HTMLElement,
+  isHomeSceneActive: boolean,
+) {
+  const shiftRatio = isHomeSceneActive ? 0 : getProductCompositionShiftRatio(container);
+
+  camera.filmOffset = shiftRatio * camera.getFilmWidth();
+  camera.updateProjectionMatrix();
+
+  if (shiftRatio > 0) {
+    container.dataset.productFrameShift = `${Math.round(shiftRatio * (container.clientWidth || 0))}px`;
+  } else {
+    delete container.dataset.productFrameShift;
+  }
 }
 
 function getLampModelUrl(lampProductId: LampProductId, sizeId: string, lampHeight: string) {
@@ -2498,6 +2555,7 @@ export default function BikeScene({
   const dimensionHotspotsRef = useRef(dimensionHotspots);
   const shouldShowDimensionsRef = useRef(shouldShowDimensions);
   const selectedHomeSceneRef = useRef(selectedHomeScene);
+  const compositionRefreshFramesRef = useRef(0);
   const [activeHotspotId, setActiveHotspotId] = useState<string | null>(null);
   const paintRef = useRef(config.paint);
   const sizeRef = useRef(config.size);
@@ -2549,6 +2607,10 @@ export default function BikeScene({
   const onIntroCompleteRef = useRef(onIntroComplete);
   const onSceneReadyRef = useRef(onSceneReady);
 
+  const queueCameraCompositionRefresh = useCallback((frames = 60) => {
+    compositionRefreshFramesRef.current = Math.max(compositionRefreshFramesRef.current, frames);
+  }, []);
+
   const refreshHotspotBounds = () => {
     const bike = bikeRef.current;
 
@@ -2581,6 +2643,7 @@ export default function BikeScene({
     lookRef.current.copy(pose.look);
     camera.position.copy(pose.camera);
     camera.lookAt(pose.look);
+    applyCameraComposition(camera, container, true);
     controls.target.copy(pose.look);
     controls.update();
     writeHomeSceneCameraData(container, camera, pose.look);
@@ -2618,6 +2681,34 @@ export default function BikeScene({
   useEffect(() => {
     selectedHomeSceneRef.current = selectedHomeScene;
   }, [selectedHomeScene]);
+
+  useEffect(() => {
+    const refreshComposition = () => {
+      const camera = cameraRef.current;
+      const container = containerRef.current;
+
+      if (!camera || !container) {
+        return;
+      }
+
+      applyCameraComposition(camera, container, Boolean(selectedHomeScene));
+      queueCameraCompositionRefresh();
+      controlsRef.current?.update();
+    };
+
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      refreshComposition();
+      secondFrame = window.requestAnimationFrame(refreshComposition);
+    });
+    const timer = window.setTimeout(refreshComposition, 350);
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(timer);
+    };
+  }, [focus, selectedHomeScene, selectedHomeLampSize, selectedLampHeight, selectedLampProduct]);
 
   useEffect(() => {
     if (!showHotspots) {
@@ -3109,7 +3200,8 @@ export default function BikeScene({
       );
       camera.fov = clientWidth < 560 ? Math.max(viewerSettingsRef.current.cameraFov, 40) : viewerSettingsRef.current.cameraFov;
       camera.aspect = clientWidth / Math.max(clientHeight, 1);
-      camera.updateProjectionMatrix();
+      applyCameraComposition(camera, container, Boolean(selectedHomeSceneRef.current));
+      queueCameraCompositionRefresh();
       applyDepthOfFieldPassSettings(
         depthOfFieldPass,
         camera,
@@ -3191,6 +3283,11 @@ export default function BikeScene({
       }
 
       if (activeCamera) {
+        if (compositionRefreshFramesRef.current > 0) {
+          applyCameraComposition(activeCamera, container, Boolean(selectedHomeSceneRef.current));
+          compositionRefreshFramesRef.current -= 1;
+        }
+
         const shouldShowDimensionsOverlay = shouldShowDimensionsRef.current;
         updateViewerHotspots({
           bounds: shouldShowDimensionsOverlay ? hotspotBoundsRef.current : null,
@@ -3769,6 +3866,8 @@ export default function BikeScene({
         lookRef.current.copy(look);
         camera.position.copy(modelCamera);
         controls.target.copy(look);
+        applyCameraComposition(camera, container, false);
+        queueCameraCompositionRefresh();
         controls.update();
         onSceneReadyRef.current();
       },
@@ -4161,7 +4260,12 @@ export default function BikeScene({
 
     if (cameraRef.current) {
       cameraRef.current.fov = viewerSettings.cameraFov;
-      cameraRef.current.updateProjectionMatrix();
+      if (container) {
+        applyCameraComposition(cameraRef.current, container, isHomeSceneActive);
+        queueCameraCompositionRefresh();
+      } else {
+        cameraRef.current.updateProjectionMatrix();
+      }
     }
   }, [backgroundMode, hdriAsset, selectedHomeScene, viewerSettings]);
 
@@ -4189,6 +4293,14 @@ export default function BikeScene({
       if (cameraRef.current && controlsRef.current) {
         cameraRef.current.position.copy(assetCameraRef.current.camera);
         controlsRef.current.target.copy(assetCameraRef.current.look);
+        if (containerRef.current) {
+          applyCameraComposition(
+            cameraRef.current,
+            containerRef.current,
+            Boolean(selectedHomeSceneRef.current),
+          );
+          queueCameraCompositionRefresh();
+        }
         controlsRef.current.update();
       }
       return;
@@ -4218,6 +4330,14 @@ export default function BikeScene({
     if (cameraRef.current && controlsRef.current) {
       cameraRef.current.position.copy(cameraTarget);
       controlsRef.current.target.copy(lookTarget);
+      if (containerRef.current) {
+        applyCameraComposition(
+          cameraRef.current,
+          containerRef.current,
+          Boolean(selectedHomeSceneRef.current),
+        );
+        queueCameraCompositionRefresh();
+      }
       controlsRef.current.update();
     }
   }, [focus]);
