@@ -679,9 +679,9 @@ const maxProductCompositionShiftRatio = 0.26;
 const productCompositionOpenAreaRatio = 0.42;
 const startupCameraHeightOffset = 0.48;
 const startupLookHeightOffset = 0.02;
-const productViewportFit = 2;
-const productCameraHeightOffset = 1.36;
-const productLookHeightOffset = 0.42;
+const productViewportFit = 2.26;
+const productCameraHeightOffset = 1.08;
+const productLookHeightOffset = -0.08;
 // Authored GLB wheel-contact height. Keep the studio floor fixed and move assets to this line.
 const bikeSourceGroundY = -2.28;
 const modelGroundY = -0.82;
