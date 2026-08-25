@@ -1418,7 +1418,7 @@ export default function ConfiguratorClient() {
                 alt="QR code to open the AR viewer"
                 className="ar-qr-code"
                 height={160}
-                src={publicAsset("ar/qr-code-4.png")}
+                src={publicAsset("ar/qr-code-6.png")}
                 width={160}
               />
               <p>Point your phone camera at this code to launch the lamp in AR.</p>
