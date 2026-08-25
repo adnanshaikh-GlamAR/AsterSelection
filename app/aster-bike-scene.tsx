@@ -648,7 +648,7 @@ const lampModelUrlsByProductColorAndHeight: Partial<
   },
 };
 const homeSceneModelUrls: Record<HomeSceneId, string> = {
-  "scene-01": publicAsset("models/home/home01.glb"),
+  "scene-01": publicAsset("models/home/home03.glb"),
 };
 const homeSceneCornerLampPosition = new THREE.Vector3(2.34, 0, -2.58);
 const homeSceneCornerLampFloorClearance = 0;
