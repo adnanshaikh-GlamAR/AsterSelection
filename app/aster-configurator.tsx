@@ -206,7 +206,7 @@ const homeLampProductLabels: Record<HomeLampProductId, string> = {
   "floor-lamp-4-heads": "Floor Lamp 4 Heads",
 };
 const homeLampProductIds: HomeLampProductId[] = ["floor-lamp-4-heads", "floor-lamp-3-heads"];
-const homeSceneCameraStorageKey = "aster-home-scene-01-camera";
+const homeSceneCameraStorageKey = "aster-home-scene-01-hdri-dome-camera";
 const homeSceneCameraControls: Array<{
   action: Exclude<HomeSceneCameraAction, "save">;
   label: string;
@@ -359,7 +359,7 @@ const defaultHomeSceneSettings: ViewerSettings = {
   floorGlow: 0.55,
   hdriIntensity: 1.15,
   hdriRotation: 107,
-  hdriScale: 0.5,
+  hdriScale: 1,
   keyIntensity: 0,
   rimIntensity: 0,
 };
@@ -626,8 +626,8 @@ const publicAsset = (path: string, options: { version?: boolean } = {}) => {
 };
 const homeSceneHdriAsset: HdriAsset = {
   kind: "hdr",
-  name: "studio_country_hall_1k.hdr",
-  url: publicAsset("hdri/home/studio_country_hall_1k.hdr"),
+  name: "cayley_interior_1k.hdr",
+  url: publicAsset("hdri/home/cayley_interior_1k.hdr"),
 };
 const hdriPresets: HdriPreset[] = [
   {

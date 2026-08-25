@@ -647,12 +647,10 @@ const lampModelUrlsByProductColorAndHeight: Partial<
     },
   },
 };
-const homeSceneModelUrls: Record<HomeSceneId, string> = {
-  "scene-01": publicAsset("models/home/home03.glb"),
-};
+const homeSceneModelUrls: Partial<Record<HomeSceneId, string>> = {};
 const homeSceneCornerLampPosition = new THREE.Vector3(2.12, 0, -1.88);
 const homeSceneCornerLampFloorClearance = 0;
-const homeSceneCornerLampFallbackFloorLift = 0.165;
+const homeSceneCornerLampFallbackFloorLift = 0;
 const homeSceneCornerLampRotationY = -0.15;
 const fallbackLampHeight = "160 CM";
 const lampEmissionTextureNames: Record<EmissionColorKey, string> = {
@@ -1688,6 +1686,7 @@ function applyViewerEnvironment({
   hdriDomeMaterial,
   hdriEnvironmentMap,
   scene,
+  showHdriDome = false,
   viewerSettings,
 }: {
   backgroundMode: BackgroundMode;
@@ -1700,9 +1699,11 @@ function applyViewerEnvironment({
   hdriDomeMaterial: HdriDomeMaterial | null;
   hdriEnvironmentMap: THREE.Texture | null;
   scene: THREE.Scene;
+  showHdriDome?: boolean;
   viewerSettings: ViewerSettings;
 }) {
   const hasHdri = backgroundMode === "hdri" && Boolean(hdriBackgroundMap && hdriEnvironmentMap);
+  const shouldShowHdriDome = hasHdri && showHdriDome;
   const environmentColor = new THREE.Color(viewerSettings.environmentColor);
 
   if (disableEnvironmentLighting) {
@@ -1747,7 +1748,7 @@ function applyViewerEnvironment({
   scene.backgroundRotation.y = 0;
   scene.backgroundBlurriness = 0;
 
-  if (hideEnvironmentPresentation) {
+  if (hideEnvironmentPresentation || shouldShowHdriDome) {
     scene.fog = null;
   } else if (!(scene.fog instanceof THREE.Fog)) {
     scene.fog = new THREE.Fog(
@@ -1760,12 +1761,12 @@ function applyViewerEnvironment({
   }
 
   if (hdriDome) {
-    hdriDome.visible = false;
+    hdriDome.visible = shouldShowHdriDome;
     hdriDome.scale.setScalar(32 * viewerSettings.hdriScale);
   }
 
   if (hdriDomeMaterial) {
-    hdriDomeMaterial.uniforms.hdriMap.value = null;
+    hdriDomeMaterial.uniforms.hdriMap.value = shouldShowHdriDome ? hdriBackgroundMap : null;
     hdriDomeMaterial.uniforms.hdriIntensity.value = Math.max(0.05, viewerSettings.hdriIntensity);
     hdriDomeMaterial.uniforms.hdriRotation.value = THREE.MathUtils.degToRad(
       viewerSettings.hdriRotation,
@@ -1775,7 +1776,8 @@ function applyViewerEnvironment({
 
   if (backdropMaterial) {
     backdropMaterial.color.copy(getTintedColor("#ffffff", viewerSettings.environmentColor, 0.36));
-    backdropMaterial.opacity = hideEnvironmentPresentation ? 0 : viewerSettings.backdropGlow;
+    backdropMaterial.opacity =
+      hideEnvironmentPresentation || shouldShowHdriDome ? 0 : viewerSettings.backdropGlow;
   }
 
   return environmentColor;
@@ -3509,8 +3511,30 @@ export default function BikeScene({
     const homeSceneUrl = homeSceneModelUrls[selectedHomeScene];
 
     if (!homeSceneUrl) {
-      container.dataset.homeScene = "missing";
-      return undefined;
+      const homeScene = new THREE.Group();
+      homeScene.name = `${selectedHomeScene}-hdri-dome`;
+
+      if (homeSceneRef.current) {
+        scene.remove(homeSceneRef.current);
+        disposeObject(homeSceneRef.current);
+      }
+
+      homeSceneRef.current = homeScene;
+      scene.add(homeScene);
+      applyHomeSceneCameraPose();
+      container.dataset.homeScene = `${selectedHomeScene}-hdri-dome`;
+      container.dataset.viewerModel = selectedHomeScene;
+      container.dataset.homeSceneCameraReset = "loaded";
+      setHomeSceneVersion((current) => current + 1);
+      onSceneReadyRef.current();
+
+      return () => {
+        if (homeSceneRef.current === homeScene) {
+          scene.remove(homeScene);
+          disposeObject(homeScene);
+          homeSceneRef.current = null;
+        }
+      };
     }
 
     let cancelled = false;
@@ -4019,6 +4043,7 @@ export default function BikeScene({
         hdriEnvironmentMap: hdriEnvironmentMapRef.current,
         hideEnvironmentPresentation: isHomeSceneActive,
         scene,
+        showHdriDome: isHomeSceneActive,
         viewerSettings: viewerSettingsRef.current,
       });
     };
@@ -4198,6 +4223,7 @@ export default function BikeScene({
         hdriEnvironmentMap: hdriEnvironmentMapRef.current,
         hideEnvironmentPresentation: isHomeSceneActive,
         scene,
+        showHdriDome: isHomeSceneActive,
         viewerSettings,
       });
     }
@@ -4355,7 +4381,7 @@ export default function BikeScene({
     <div
       className="bike-stage"
       data-background-mode={backgroundMode}
-      data-hdri-display="hidden"
+      data-hdri-display={selectedHomeScene ? "visible" : "hidden"}
       data-hdri-name={hdriAsset?.name ?? ""}
       ref={containerRef}
     >
