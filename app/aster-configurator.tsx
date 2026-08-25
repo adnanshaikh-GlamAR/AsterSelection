@@ -114,6 +114,11 @@ type HdriAsset = {
   url: string;
 };
 
+type TestingModelAsset = {
+  name: string;
+  url: string;
+};
+
 type HdriPreset = HdriAsset & {
   id: string;
   label: string;
@@ -239,6 +244,20 @@ function getLampHeightOptions(sizeId: string, lampProductId: LampProductId = "fl
   }
 
   return lampHeightOptionsBySize[sizeId] ?? lampHeightOptionsBySize.S;
+}
+
+function getHdriAssetKindFromFile(file: File): HdriAssetKind {
+  const extension = file.name.split(".").pop()?.toLowerCase();
+
+  if (extension === "hdr") {
+    return "hdr";
+  }
+
+  if (extension === "exr") {
+    return "exr";
+  }
+
+  return "image";
 }
 
 function getSizeOptionsForLampProduct(lampProductId: LampProductId) {
@@ -936,6 +955,8 @@ export default function ConfiguratorClient() {
   );
   const [homeSceneSettings, setHomeSceneSettings] =
     useState<ViewerSettings>(defaultHomeSceneSettings);
+  const [testingModelAsset, setTestingModelAsset] = useState<TestingModelAsset | null>(null);
+  const [testingHdriAsset, setTestingHdriAsset] = useState<HdriAsset | null>(null);
   const [viewerSettings, setViewerSettings] = useState<ViewerSettings>(defaultViewerSettings);
 
   useEffect(() => {
@@ -970,6 +991,22 @@ export default function ConfiguratorClient() {
 
     return () => window.clearTimeout(timer);
   }, [introPhase, loaderProgress, sceneReady]);
+
+  useEffect(() => {
+    return () => {
+      if (testingModelAsset?.url.startsWith("blob:")) {
+        URL.revokeObjectURL(testingModelAsset.url);
+      }
+    };
+  }, [testingModelAsset]);
+
+  useEffect(() => {
+    return () => {
+      if (testingHdriAsset?.url.startsWith("blob:")) {
+        URL.revokeObjectURL(testingHdriAsset.url);
+      }
+    };
+  }, [testingHdriAsset]);
 
   const paint = getPaint(config.paint);
   const total = useMemo(() => {
@@ -1130,6 +1167,46 @@ export default function ConfiguratorClient() {
     }));
   };
 
+  const updateTestingModelUpload = (file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith(".glb")) {
+      setStatus("Choose a GLB file for testing.");
+      return;
+    }
+
+    setTestingModelAsset({
+      name: file.name,
+      url: URL.createObjectURL(file),
+    });
+    setStatus("Testing GLB loaded.");
+  };
+
+  const updateTestingHdriUpload = (file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    setTestingHdriAsset({
+      kind: getHdriAssetKindFromFile(file),
+      name: file.name,
+      url: URL.createObjectURL(file),
+    });
+    setStatus("Testing HDRI loaded.");
+  };
+
+  const clearTestingModelUpload = () => {
+    setTestingModelAsset(null);
+    setStatus("Testing GLB cleared.");
+  };
+
+  const clearTestingHdriUpload = () => {
+    setTestingHdriAsset(null);
+    setStatus("Testing HDRI cleared.");
+  };
+
   const updateHomeEmissionColor = (emissionColor: EmissionColorKey) => {
     setHomeSceneSettings((current) => ({
       ...current,
@@ -1267,8 +1344,15 @@ export default function ConfiguratorClient() {
   const activeHdriPreset = backgroundMode === "hdri" && hdriAsset
     ? hdriPresets.find((preset) => preset.url === hdriAsset.url)
     : null;
-  const activeSceneBackgroundMode: BackgroundMode = activeHomeScene ? "hdri" : backgroundMode;
-  const activeSceneHdriAsset = activeHomeScene ? homeSceneHdriAsset : hdriAsset;
+  const testingUploadPreviewActive = activeStage === "build" || activeStage === "light";
+  const productViewerBackgroundMode: BackgroundMode = testingUploadPreviewActive && testingHdriAsset
+    ? "hdri"
+    : backgroundMode;
+  const productViewerHdriAsset = testingUploadPreviewActive && testingHdriAsset
+    ? testingHdriAsset
+    : hdriAsset;
+  const activeSceneBackgroundMode: BackgroundMode = activeHomeScene ? "hdri" : productViewerBackgroundMode;
+  const activeSceneHdriAsset = activeHomeScene ? homeSceneHdriAsset : productViewerHdriAsset;
   const activeSceneViewerSettings = useMemo<ViewerSettings>(() => {
     if (!activeHomeScene) {
       return viewerSettings;
@@ -1284,6 +1368,8 @@ export default function ConfiguratorClient() {
   const activeSceneLampHeight = activeHomeScene
     ? selectedHomeProductVariant.height
     : selectedLampHeight;
+  const activeTestingModelName = testingUploadPreviewActive ? testingModelAsset?.name ?? null : null;
+  const activeTestingModelUrl = testingUploadPreviewActive ? testingModelAsset?.url ?? null : null;
   const changeHomeProductVariant = (direction: -1 | 1) => {
     setSelectedHomeScene("scene-01");
     setSelectedHomeProductVariantIndex((current) => {
@@ -1313,6 +1399,8 @@ export default function ConfiguratorClient() {
             selectedLampProduct={activeSceneLampProduct}
             showLampModel={showLampModel}
             showHotspots={showHotspots}
+            testingModelName={activeTestingModelName}
+            testingModelUrl={activeTestingModelUrl}
             viewerSettings={activeSceneViewerSettings}
           />
         </Suspense>
@@ -1675,6 +1763,54 @@ export default function ConfiguratorClient() {
                   onChange={updateEmissionColor}
                   value={viewerSettings.emissionColor}
                 />
+              </div>
+
+              <div className="studio-group testing-upload-group">
+                <p>Testing Uploads</p>
+                <div className="testing-upload-grid">
+                  <label className="testing-upload-slot">
+                    <span>
+                      <em>GLB</em>
+                      <strong>{testingModelAsset?.name ?? "Choose file"}</strong>
+                    </span>
+                    <input
+                      accept=".glb,model/gltf-binary"
+                      onChange={(event) => {
+                        updateTestingModelUpload(event.currentTarget.files?.[0] ?? null);
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                  </label>
+                  <label className="testing-upload-slot">
+                    <span>
+                      <em>HDRI</em>
+                      <strong>{testingHdriAsset?.name ?? "Choose file"}</strong>
+                    </span>
+                    <input
+                      accept=".hdr,.exr,.jpg,.jpeg,.png,.webp,image/*"
+                      onChange={(event) => {
+                        updateTestingHdriUpload(event.currentTarget.files?.[0] ?? null);
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                  </label>
+                </div>
+                {(testingModelAsset || testingHdriAsset) && (
+                  <div className="testing-upload-actions">
+                    {testingModelAsset && (
+                      <button onClick={clearTestingModelUpload} type="button">
+                        Clear GLB
+                      </button>
+                    )}
+                    {testingHdriAsset && (
+                      <button onClick={clearTestingHdriUpload} type="button">
+                        Clear HDRI
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
           )}

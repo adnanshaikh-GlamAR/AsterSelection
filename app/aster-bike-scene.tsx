@@ -779,6 +779,13 @@ function getLampVariantModelName(lampProductId: LampProductId, sizeId: string, l
   return `${lampProductId}-${sizeId}-${lampHeight.toLowerCase().replace(/\s+/g, "-")}`;
 }
 
+function getTestingModelName(fileName: string | null) {
+  const basename = fileName?.replace(/\.[^.]+$/, "") ?? "uploaded-glb";
+  const slug = basename.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  return `testing-${slug || "uploaded-glb"}`;
+}
+
 function getFallbackLampHeight(lampProductId: LampProductId, sizeId: string) {
   const productHeights = lampModelUrlsByProductColorAndHeight[lampProductId]?.[sizeId];
   const colorHeights = lampModelUrlsByColorAndHeight[sizeId];
@@ -2507,6 +2514,8 @@ export default function BikeScene({
   selectedLampProduct,
   showLampModel,
   showHotspots,
+  testingModelName,
+  testingModelUrl,
   viewerSettings,
 }: {
   backgroundMode: BackgroundMode;
@@ -2526,6 +2535,8 @@ export default function BikeScene({
   selectedLampProduct: LampProductId;
   showLampModel: boolean;
   showHotspots: boolean;
+  testingModelName: string | null;
+  testingModelUrl: string | null;
   viewerSettings: ViewerSettings;
 }) {
   const dimensionHotspots = getViewerDimensionHotspots(selectedLampHeight);
@@ -3867,12 +3878,15 @@ export default function BikeScene({
     }
 
     let cancelled = false;
-    const activeLampHeight = getLampModelUrl(selectedLampProduct, config.size, selectedLampHeight)
-      ? selectedLampHeight
-      : fallbackLampHeight;
-    const activeLampModelUrl = getLampModelUrl(selectedLampProduct, config.size, activeLampHeight) ?? lampModelUrlsByHeight[fallbackLampHeight];
-    const activeLampModelName =
-      `${selectedLampProduct}-${config.size}-${activeLampHeight.toLowerCase().replace(/\s+/g, "-")}`;
+    const mappedLampModelUrl = getLampModelUrl(selectedLampProduct, config.size, selectedLampHeight);
+    const hasActiveLampModel = Boolean(testingModelUrl || mappedLampModelUrl);
+    const activeLampHeight = hasActiveLampModel ? selectedLampHeight : fallbackLampHeight;
+    const activeLampModelUrl = testingModelUrl
+      ?? getLampModelUrl(selectedLampProduct, config.size, activeLampHeight)
+      ?? lampModelUrlsByHeight[fallbackLampHeight];
+    const activeLampModelName = testingModelUrl
+      ? getTestingModelName(testingModelName)
+      : getLampVariantModelName(selectedLampProduct, config.size, activeLampHeight);
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath(publicAsset("draco/gltf/", { version: false }));
 
@@ -3880,6 +3894,11 @@ export default function BikeScene({
     loader.setDRACOLoader(dracoLoader);
     container.dataset.viewerModel = "lamp-loading";
     container.dataset.viewerHeight = activeLampHeight;
+    if (testingModelUrl) {
+      container.dataset.testingModel = testingModelName ?? "uploaded-glb";
+    } else {
+      delete container.dataset.testingModel;
+    }
     loader.load(
       activeLampModelUrl,
       (gltf) => {
@@ -3926,6 +3945,11 @@ export default function BikeScene({
         scene.add(group);
         container.dataset.viewerModel = activeLampModelName;
         container.dataset.viewerHeight = activeLampHeight;
+        if (testingModelUrl) {
+          container.dataset.testingModel = testingModelName ?? "uploaded-glb";
+        } else {
+          delete container.dataset.testingModel;
+        }
         container.dataset.bloom = getBloomSettingValue(viewerSettingsRef.current.bloom).toFixed(2);
         container.dataset.bloomScope = "model-emission-mask";
         container.dataset.emissionMap = activeEmissionTexture
@@ -3967,6 +3991,8 @@ export default function BikeScene({
     selectedLampHeight,
     selectedLampProduct,
     showLampModel,
+    testingModelName,
+    testingModelUrl,
   ]);
 
   useEffect(() => {
