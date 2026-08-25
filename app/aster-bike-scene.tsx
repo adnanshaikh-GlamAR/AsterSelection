@@ -8,6 +8,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { EXRLoader } from "three/examples/jsm/loaders/EXRLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+import { BokehPass } from "three/examples/jsm/postprocessing/BokehPass.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -112,6 +113,10 @@ type ViewerSettings = {
   bloom: number;
   bloomRadius: number;
   bloomThreshold: number;
+  depthOfField: boolean;
+  dofFocus: number;
+  dofAperture: number;
+  dofMaxBlur: number;
   emissionStrength: number;
   emissionColor: EmissionColorKey;
   hdriIntensity: number;
@@ -144,6 +149,17 @@ type SelectiveBloomCompositePass = ShaderPass & {
     bloomIntensity: { value: number };
     bloomTexture: { value: THREE.Texture | null };
     maskTexture: { value: THREE.Texture | null };
+  };
+};
+
+type DepthOfFieldPass = BokehPass & {
+  uniforms: {
+    aperture: { value: number };
+    aspect: { value: number };
+    farClip: { value: number };
+    focus: { value: number };
+    maxblur: { value: number };
+    nearClip: { value: number };
   };
 };
 
@@ -251,6 +267,10 @@ const defaultViewerSettings: ViewerSettings = {
   bloomRadius: 0.3,
   bloomThreshold: 0.55,
   cameraFov: 35,
+  depthOfField: false,
+  dofAperture: 0.025,
+  dofFocus: 8,
+  dofMaxBlur: 0,
   emissionColor: "warm",
   emissionStrength: 4.5,
   environmentColor: "#ffffff",
@@ -628,8 +648,12 @@ const lampModelUrlsByProductColorAndHeight: Partial<
   },
 };
 const homeSceneModelUrls: Record<HomeSceneId, string> = {
-  "scene-01": publicAsset("models/home/home02.glb"),
+  "scene-01": publicAsset("models/home/home01.glb"),
 };
+const homeSceneCornerLampPosition = new THREE.Vector3(2.34, 0, -2.58);
+const homeSceneCornerLampFloorClearance = 0;
+const homeSceneCornerLampFallbackFloorLift = 0.165;
+const homeSceneCornerLampRotationY = -0.15;
 const fallbackLampHeight = "160 CM";
 const lampEmissionTextureNames: Record<EmissionColorKey, string> = {
   cool: "Lamp_Texture_Cool.png",
@@ -693,6 +717,17 @@ function getLampModelUrl(lampProductId: LampProductId, sizeId: string, lampHeigh
   return lampModelUrlsByProductColorAndHeight[lampProductId]?.[sizeId]?.[lampHeight]
     ?? lampModelUrlsByColorAndHeight[sizeId]?.[lampHeight]
     ?? lampModelUrlsByHeight[lampHeight];
+}
+
+function getLampVariantModelName(lampProductId: LampProductId, sizeId: string, lampHeight: string) {
+  return `${lampProductId}-${sizeId}-${lampHeight.toLowerCase().replace(/\s+/g, "-")}`;
+}
+
+function getFallbackLampHeight(lampProductId: LampProductId, sizeId: string) {
+  const productHeights = lampModelUrlsByProductColorAndHeight[lampProductId]?.[sizeId];
+  const colorHeights = lampModelUrlsByColorAndHeight[sizeId];
+
+  return Object.keys(productHeights ?? colorHeights ?? {})[0] ?? fallbackLampHeight;
 }
 
 function getLampEmissionColor(emissionColor: EmissionColorKey) {
@@ -1164,6 +1199,18 @@ function getEmissionStrengthSettingValue(emissionStrength: number) {
   return Number.isFinite(emissionStrength) ? emissionStrength : defaultViewerSettings.emissionStrength;
 }
 
+function getDofFocusSettingValue(dofFocus: number) {
+  return Number.isFinite(dofFocus) ? dofFocus : defaultViewerSettings.dofFocus;
+}
+
+function getDofApertureSettingValue(dofAperture: number) {
+  return Number.isFinite(dofAperture) ? dofAperture : defaultViewerSettings.dofAperture;
+}
+
+function getDofMaxBlurSettingValue(dofMaxBlur: number) {
+  return Number.isFinite(dofMaxBlur) ? dofMaxBlur : defaultViewerSettings.dofMaxBlur;
+}
+
 function getComposerBloomTexture(composer: EffectComposer) {
   return (composer as EffectComposer & { renderTarget2: THREE.WebGLRenderTarget }).renderTarget2.texture;
 }
@@ -1278,6 +1325,33 @@ function applyBloomPassSettings(
   if (compositePass) {
     compositePass.uniforms.bloomIntensity.value = bloomLevel > 0 ? 1 : 0;
   }
+}
+
+function applyDepthOfFieldPassSettings(
+  depthOfFieldPass: DepthOfFieldPass | null,
+  camera: THREE.PerspectiveCamera | null,
+  viewerSettings: ViewerSettings,
+  viewportWidth?: number,
+  viewportHeight?: number,
+) {
+  if (!depthOfFieldPass || !camera) {
+    return;
+  }
+
+  const focus = THREE.MathUtils.clamp(getDofFocusSettingValue(viewerSettings.dofFocus), 0.2, 30);
+  const aperture = THREE.MathUtils.clamp(getDofApertureSettingValue(viewerSettings.dofAperture), 0.001, 0.12);
+  const maxBlur = THREE.MathUtils.clamp(getDofMaxBlurSettingValue(viewerSettings.dofMaxBlur), 0, 0.04);
+  const isEnabled = viewerSettings.depthOfField && maxBlur > 0;
+
+  depthOfFieldPass.enabled = isEnabled;
+  depthOfFieldPass.uniforms.focus.value = focus;
+  depthOfFieldPass.uniforms.aperture.value = aperture;
+  depthOfFieldPass.uniforms.maxblur.value = isEnabled ? maxBlur : 0;
+  depthOfFieldPass.uniforms.aspect.value = viewportWidth && viewportHeight
+    ? viewportWidth / viewportHeight
+    : camera.aspect;
+  depthOfFieldPass.uniforms.nearClip.value = camera.near;
+  depthOfFieldPass.uniforms.farClip.value = camera.far;
 }
 
 function getEmissionOnlyMaterialReplacement(
@@ -1548,6 +1622,8 @@ function createHdriDomeMaterial(settings: ViewerSettings): HdriDomeMaterial {
 function applyViewerEnvironment({
   backgroundMode,
   backdropMaterial,
+  disableEnvironmentLighting = false,
+  hideEnvironmentPresentation = false,
   hdriBackgroundMap,
   defaultEnvironmentMap,
   hdriDome,
@@ -1558,6 +1634,8 @@ function applyViewerEnvironment({
 }: {
   backgroundMode: BackgroundMode;
   backdropMaterial: THREE.MeshBasicMaterial | null;
+  disableEnvironmentLighting?: boolean;
+  hideEnvironmentPresentation?: boolean;
   defaultEnvironmentMap: THREE.Texture | null;
   hdriBackgroundMap: THREE.Texture | null;
   hdriDome: THREE.Mesh<THREE.SphereGeometry, HdriDomeMaterial> | null;
@@ -1568,6 +1646,35 @@ function applyViewerEnvironment({
 }) {
   const hasHdri = backgroundMode === "hdri" && Boolean(hdriBackgroundMap && hdriEnvironmentMap);
   const environmentColor = new THREE.Color(viewerSettings.environmentColor);
+
+  if (disableEnvironmentLighting) {
+    scene.environment = null;
+    scene.environmentIntensity = 0;
+    scene.environmentRotation.y = 0;
+    scene.background = null;
+    scene.backgroundIntensity = 1;
+    scene.backgroundRotation.y = 0;
+    scene.backgroundBlurriness = 0;
+    scene.fog = null;
+
+    if (hdriDome) {
+      hdriDome.visible = false;
+      hdriDome.scale.setScalar(32 * viewerSettings.hdriScale);
+    }
+
+    if (hdriDomeMaterial) {
+      hdriDomeMaterial.uniforms.hdriMap.value = null;
+      hdriDomeMaterial.uniforms.hdriIntensity.value = 0;
+      hdriDomeMaterial.uniforms.hdriRotation.value = 0;
+      hdriDomeMaterial.uniforms.hdriScale.value = viewerSettings.hdriScale;
+    }
+
+    if (backdropMaterial) {
+      backdropMaterial.opacity = 0;
+    }
+
+    return environmentColor;
+  }
 
   scene.environment = hasHdri ? hdriEnvironmentMap : defaultEnvironmentMap;
   scene.environmentIntensity = hasHdri
@@ -1582,7 +1689,9 @@ function applyViewerEnvironment({
   scene.backgroundRotation.y = 0;
   scene.backgroundBlurriness = 0;
 
-  if (!(scene.fog instanceof THREE.Fog)) {
+  if (hideEnvironmentPresentation) {
+    scene.fog = null;
+  } else if (!(scene.fog instanceof THREE.Fog)) {
     scene.fog = new THREE.Fog(
       getTintedColor("#ffffff", viewerSettings.environmentColor, 0.38),
       7.5,
@@ -1608,7 +1717,7 @@ function applyViewerEnvironment({
 
   if (backdropMaterial) {
     backdropMaterial.color.copy(getTintedColor("#ffffff", viewerSettings.environmentColor, 0.36));
-    backdropMaterial.opacity = viewerSettings.backdropGlow;
+    backdropMaterial.opacity = hideEnvironmentPresentation ? 0 : viewerSettings.backdropGlow;
   }
 
   return environmentColor;
@@ -1701,6 +1810,75 @@ function prepareHomeSceneModel(model: THREE.Object3D, anisotropy = 1) {
   group.name = "home-scene-01";
   group.scale.setScalar(scale);
   group.position.y = modelGroundY - (bounds.min.y - center.y) * scale;
+
+  return group;
+}
+
+function getIntersectionWorldNormal(intersection: THREE.Intersection) {
+  if (!intersection.face) {
+    return null;
+  }
+
+  return intersection.face.normal
+    .clone()
+    .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld))
+    .normalize();
+}
+
+function getHomeSceneCornerLampFloorY(homeScene: THREE.Object3D) {
+  const fallbackFloorY = modelGroundY + homeSceneCornerLampFallbackFloorLift;
+  homeScene.updateWorldMatrix(true, true);
+
+  const bounds = new THREE.Box3().setFromObject(homeScene);
+  if (bounds.isEmpty()) {
+    return fallbackFloorY;
+  }
+
+  const size = bounds.getSize(new THREE.Vector3());
+  const rayOrigin = new THREE.Vector3(
+    homeSceneCornerLampPosition.x,
+    bounds.max.y + 1,
+    homeSceneCornerLampPosition.z,
+  );
+  const raycaster = new THREE.Raycaster(
+    rayOrigin,
+    new THREE.Vector3(0, -1, 0),
+    0,
+    Math.max(size.y + 2, 2),
+  );
+  const floorBandTop = bounds.min.y + Math.max(size.y * 0.22, 0.35);
+  const intersections = raycaster.intersectObject(homeScene, true);
+  const floorHit =
+    intersections.find((intersection) => {
+      const normal = getIntersectionWorldNormal(intersection);
+      return intersection.point.y <= floorBandTop && (!normal || normal.y > 0.35);
+    }) ?? intersections.find((intersection) => intersection.point.y <= floorBandTop);
+
+  return floorHit?.point.y ?? fallbackFloorY;
+}
+
+function prepareHomeSceneCornerLampModel(
+  model: THREE.Object3D,
+  anisotropy = 1,
+  floorY?: number,
+  modelId = "home-scene-corner-lamp",
+) {
+  prepareModelForViewport(model, anisotropy);
+
+  const bounds = new THREE.Box3().setFromObject(model);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const group = new THREE.Group();
+
+  model.position.set(-center.x, -bounds.min.y, -center.z);
+  group.add(model);
+  group.name = modelId;
+  group.position.set(
+    homeSceneCornerLampPosition.x,
+    (floorY ?? modelGroundY + homeSceneCornerLampFallbackFloorLift) +
+      homeSceneCornerLampFloorClearance,
+    homeSceneCornerLampPosition.z,
+  );
+  group.rotation.y = homeSceneCornerLampRotationY;
 
   return group;
 }
@@ -2259,6 +2437,7 @@ export default function BikeScene({
   onHomeSceneCameraPoseChange,
   onSceneReady,
   selectedHomeScene,
+  selectedHomeLampSize,
   selectedLampHeight,
   selectedLampProduct,
   showLampModel,
@@ -2277,6 +2456,7 @@ export default function BikeScene({
   onHomeSceneCameraPoseChange: (pose: HomeSceneCameraPose) => void;
   onSceneReady: () => void;
   selectedHomeScene: HomeSceneId | null;
+  selectedHomeLampSize: string;
   selectedLampHeight: string;
   selectedLampProduct: LampProductId;
   showLampModel: boolean;
@@ -2293,6 +2473,7 @@ export default function BikeScene({
   const bloomMaskTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
   const bloomPassRef = useRef<UnrealBloomPass | null>(null);
   const bloomCompositePassRef = useRef<SelectiveBloomCompositePass | null>(null);
+  const depthOfFieldPassRef = useRef<DepthOfFieldPass | null>(null);
   const defaultEnvironmentMapRef = useRef<THREE.Texture | null>(null);
   const hdriBackgroundMapRef = useRef<THREE.Texture | null>(null);
   const hdriEnvironmentMapRef = useRef<THREE.Texture | null>(null);
@@ -2300,6 +2481,8 @@ export default function BikeScene({
   const hdriDomeMaterialRef = useRef<HdriDomeMaterial | null>(null);
   const bikeRef = useRef<THREE.Group | null>(null);
   const homeSceneRef = useRef<THREE.Group | null>(null);
+  const homeSceneCornerLampRef = useRef<THREE.Group | null>(null);
+  const homeSceneMaterialsRef = useRef<THREE.Material[]>([]);
   const frameMorphMeshesRef = useRef<THREE.Mesh[]>([]);
   const handleMorphMeshesRef = useRef<THREE.Mesh[]>([]);
   const seatMorphMeshesRef = useRef<THREE.Mesh[]>([]);
@@ -2314,6 +2497,7 @@ export default function BikeScene({
   const hotspotProjectionPointRef = useRef(new THREE.Vector3());
   const dimensionHotspotsRef = useRef(dimensionHotspots);
   const shouldShowDimensionsRef = useRef(shouldShowDimensions);
+  const selectedHomeSceneRef = useRef(selectedHomeScene);
   const [activeHotspotId, setActiveHotspotId] = useState<string | null>(null);
   const paintRef = useRef(config.paint);
   const sizeRef = useRef(config.size);
@@ -2336,10 +2520,12 @@ export default function BikeScene({
   const modelMaterialsRef = useRef<THREE.Material[]>([]);
   const lampEmissionMaterialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
   const lampEmissionTexturesRef = useRef<Partial<Record<EmissionColorKey, THREE.Texture>>>({});
+  const [homeSceneVersion, setHomeSceneVersion] = useState(0);
   const domeMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const floorGlowMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const contactAoMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const backdropMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
+  const studioSurfacesGroupRef = useRef<THREE.Group | null>(null);
   const stageRingMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const stageRingHighlightMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const assetCameraRef = useRef<{ camera: THREE.Vector3; look: THREE.Vector3 } | null>(null);
@@ -2428,6 +2614,10 @@ export default function BikeScene({
   useEffect(() => {
     shouldShowDimensionsRef.current = shouldShowDimensions;
   }, [shouldShowDimensions]);
+
+  useEffect(() => {
+    selectedHomeSceneRef.current = selectedHomeScene;
+  }, [selectedHomeScene]);
 
   useEffect(() => {
     if (!showHotspots) {
@@ -2519,22 +2709,36 @@ export default function BikeScene({
     const composer = new EffectComposer(renderer);
     const renderPass = new RenderPass(scene, camera);
     const bloomCompositePass = createSelectiveBloomCompositePass(bloomComposer, bloomMaskTarget);
+    const depthOfFieldPass = new BokehPass(scene, camera, {
+      aperture: getDofApertureSettingValue(initialSettings.dofAperture),
+      focus: getDofFocusSettingValue(initialSettings.dofFocus),
+      maxblur: getDofMaxBlurSettingValue(initialSettings.dofMaxBlur),
+    }) as DepthOfFieldPass;
     const outputPass = new OutputPass();
     composer.setPixelRatio(initialPixelRatio);
     composer.addPass(renderPass);
     composer.addPass(bloomCompositePass);
+    composer.addPass(depthOfFieldPass);
     composer.addPass(outputPass);
     composerRef.current = composer;
     bloomComposerRef.current = bloomComposer;
     bloomMaskTargetRef.current = bloomMaskTarget;
     bloomPassRef.current = bloomPass;
     bloomCompositePassRef.current = bloomCompositePass;
+    depthOfFieldPassRef.current = depthOfFieldPass;
     applyBloomPassSettings(
       bloomPass,
       bloomCompositePass,
       initialBloom,
       initialSettings.bloomRadius,
       initialSettings.bloomThreshold,
+    );
+    applyDepthOfFieldPassSettings(
+      depthOfFieldPass,
+      camera,
+      initialSettings,
+      container.clientWidth || 1,
+      container.clientHeight || 1,
     );
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -2611,6 +2815,7 @@ export default function BikeScene({
     floorGlowMaterialRef.current = studioSurfaces.floorGlowMaterial;
     contactAoMaterialRef.current = studioSurfaces.contactAoMaterial;
     backdropMaterialRef.current = studioSurfaces.backdropMaterial;
+    studioSurfacesGroupRef.current = studioSurfaces.group;
     stageRingMaterialRef.current = studioSurfaces.stageRingMaterial;
     stageRingHighlightMaterialRef.current = studioSurfaces.stageRingHighlight.material;
     scene.add(studioSurfaces.group);
@@ -2905,6 +3110,13 @@ export default function BikeScene({
       camera.fov = clientWidth < 560 ? Math.max(viewerSettingsRef.current.cameraFov, 40) : viewerSettingsRef.current.cameraFov;
       camera.aspect = clientWidth / Math.max(clientHeight, 1);
       camera.updateProjectionMatrix();
+      applyDepthOfFieldPassSettings(
+        depthOfFieldPass,
+        camera,
+        viewerSettingsRef.current,
+        clientWidth,
+        clientHeight,
+      );
       controls.update();
     };
 
@@ -3028,6 +3240,9 @@ export default function BikeScene({
       if (homeSceneRef.current) {
         disposeObject(homeSceneRef.current);
       }
+      if (homeSceneCornerLampRef.current) {
+        disposeObject(homeSceneCornerLampRef.current);
+      }
       if (hdriDomeRef.current) {
         disposeObject(hdriDomeRef.current);
       }
@@ -3049,6 +3264,8 @@ export default function BikeScene({
       handleMorphMeshesRef.current = [];
       seatMorphMeshesRef.current = [];
       homeSceneRef.current = null;
+      homeSceneCornerLampRef.current = null;
+      homeSceneMaterialsRef.current = [];
       lampEmissionMaterialsRef.current = [];
       Object.values(lampEmissionTexturesRef.current).forEach((texture) => texture?.dispose());
       lampEmissionTexturesRef.current = {};
@@ -3058,6 +3275,7 @@ export default function BikeScene({
       bloomMaskTargetRef.current = null;
       bloomPassRef.current = null;
       bloomCompositePassRef.current = null;
+      depthOfFieldPassRef.current = null;
       ambientLightRef.current = null;
       keyLightRef.current = null;
       fillLightRef.current = null;
@@ -3067,6 +3285,7 @@ export default function BikeScene({
       floorGlowMaterialRef.current = null;
       contactAoMaterialRef.current = null;
       backdropMaterialRef.current = null;
+      studioSurfacesGroupRef.current = null;
       stageRingMaterialRef.current = null;
       stageRingHighlightMaterialRef.current = null;
       environmentMap.dispose();
@@ -3089,6 +3308,7 @@ export default function BikeScene({
       delete container.dataset.homeSceneLook;
       delete container.dataset.bloom;
       delete container.dataset.bloomScope;
+      delete container.dataset.depthOfField;
       delete container.dataset.effectivePixelRatio;
       delete container.dataset.emissionColor;
       delete container.dataset.emissionMap;
@@ -3097,6 +3317,7 @@ export default function BikeScene({
       selectiveBloomMaskMaterial.dispose();
       bloomMaskTarget.dispose();
       bloomCompositePass.dispose();
+      depthOfFieldPass.dispose();
       outputPass.dispose();
       bloomPass.dispose();
       bloomComposer.dispose();
@@ -3123,9 +3344,19 @@ export default function BikeScene({
         disposeObject(homeSceneRef.current);
         homeSceneRef.current = null;
       }
+      if (homeSceneCornerLampRef.current) {
+        scene.remove(homeSceneCornerLampRef.current);
+        disposeObject(homeSceneCornerLampRef.current);
+        homeSceneCornerLampRef.current = null;
+      }
+      homeSceneMaterialsRef.current = [];
+      modelMaterialsRef.current = [];
+      lampEmissionMaterialsRef.current = [];
 
       delete container.dataset.homeScene;
       delete container.dataset.homeSceneMode;
+      delete container.dataset.homeSceneCornerLamp;
+      delete container.dataset.homeSceneCornerLampPosition;
       delete container.dataset.homeSceneCamera;
       delete container.dataset.homeSceneCameraRotation;
       delete container.dataset.homeSceneCameraReset;
@@ -3140,6 +3371,11 @@ export default function BikeScene({
       disposeObject(bikeRef.current);
       bikeRef.current = null;
     }
+    if (homeSceneCornerLampRef.current) {
+      scene.remove(homeSceneCornerLampRef.current);
+      disposeObject(homeSceneCornerLampRef.current);
+      homeSceneCornerLampRef.current = null;
+    }
     modelLoadedRef.current = false;
     fallbackRef.current = false;
     assetSourceCenterRef.current = null;
@@ -3149,6 +3385,7 @@ export default function BikeScene({
     handleMorphMeshesRef.current = [];
     seatMorphMeshesRef.current = [];
     modelMaterialsRef.current = [];
+    homeSceneMaterialsRef.current = [];
     lampEmissionMaterialsRef.current = [];
     refreshHotspotBounds();
     container.dataset.viewerModel = `${selectedHomeScene}-loading`;
@@ -3156,6 +3393,7 @@ export default function BikeScene({
     delete container.dataset.viewerHeight;
     delete container.dataset.emissionColor;
     delete container.dataset.emissionSlot;
+    delete container.dataset.homeSceneCornerLampPosition;
     delete container.dataset.homeSceneCamera;
     delete container.dataset.homeSceneCameraRotation;
     delete container.dataset.homeSceneCameraReset;
@@ -3192,10 +3430,13 @@ export default function BikeScene({
         const homeScene = prepareHomeSceneModel(gltf.scene, anisotropyRef.current);
         homeSceneRef.current = homeScene;
         scene.add(homeScene);
+        homeSceneMaterialsRef.current = collectModelMaterials(homeScene);
+        applyModelAmbientOcclusion(homeSceneMaterialsRef.current, viewerSettingsRef.current.aoIntensity);
         applyHomeSceneCameraPose();
         container.dataset.homeScene = selectedHomeScene;
         container.dataset.viewerModel = selectedHomeScene;
         container.dataset.homeSceneCameraReset = "loaded";
+        setHomeSceneVersion((current) => current + 1);
         onSceneReadyRef.current();
       },
       undefined,
@@ -3212,6 +3453,119 @@ export default function BikeScene({
       dracoLoader.dispose();
     };
   }, [applyHomeSceneCameraPose, selectedHomeScene]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const container = containerRef.current;
+    const homeScene = homeSceneRef.current;
+
+    if (!selectedHomeScene || !scene || !container || !homeScene) {
+      return undefined;
+    }
+
+    const fallbackHomeLampHeight = getFallbackLampHeight(selectedLampProduct, selectedHomeLampSize);
+    const activeLampHeight = getLampModelUrl(
+      selectedLampProduct,
+      selectedHomeLampSize,
+      selectedLampHeight,
+    )
+      ? selectedLampHeight
+      : fallbackHomeLampHeight;
+    const activeLampModelUrl = getLampModelUrl(
+      selectedLampProduct,
+      selectedHomeLampSize,
+      activeLampHeight,
+    ) ?? lampModelUrlsByHeight[fallbackLampHeight];
+    const activeLampModelName = getLampVariantModelName(
+      selectedLampProduct,
+      selectedHomeLampSize,
+      activeLampHeight,
+    );
+
+    if (!activeLampModelUrl) {
+      container.dataset.homeSceneCornerLamp = `${activeLampModelName}-missing`;
+      return undefined;
+    }
+
+    let cancelled = false;
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(publicAsset("draco/gltf/", { version: false }));
+
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+    container.dataset.homeSceneCornerLamp = `${activeLampModelName}-loading`;
+    container.dataset.viewerHeight = activeLampHeight;
+
+    loader.load(
+      activeLampModelUrl,
+      (gltf) => {
+        if (cancelled) {
+          disposeObject(gltf.scene);
+          return;
+        }
+
+        if (homeSceneCornerLampRef.current) {
+          scene.remove(homeSceneCornerLampRef.current);
+          disposeObject(homeSceneCornerLampRef.current);
+        }
+
+        const floorY = getHomeSceneCornerLampFloorY(homeScene);
+        const cornerLamp = prepareHomeSceneCornerLampModel(
+          gltf.scene,
+          anisotropyRef.current,
+          floorY,
+          activeLampModelName,
+        );
+        homeSceneCornerLampRef.current = cornerLamp;
+        scene.add(cornerLamp);
+        modelLoadedRef.current = true;
+        modelMaterialsRef.current = collectModelMaterials(cornerLamp);
+        lampEmissionMaterialsRef.current = collectLampEmissionMaterials(cornerLamp);
+        applyModelAmbientOcclusion(modelMaterialsRef.current, viewerSettingsRef.current.modelAoIntensity);
+
+        const activeEmissionTexture = getLampEmissionTexture(
+          lampEmissionTexturesRef.current,
+          viewerSettingsRef.current.emissionColor,
+        );
+        applyLampEmissionSettings(
+          lampEmissionMaterialsRef.current,
+          activeEmissionTexture,
+          viewerSettingsRef.current.bloom,
+          viewerSettingsRef.current.emissionStrength,
+          viewerSettingsRef.current.emissionColor,
+        );
+
+        container.dataset.homeSceneCornerLamp = activeLampModelName;
+        container.dataset.homeSceneCornerLampPosition = formatCameraVector(cornerLamp.position);
+        container.dataset.emissionMap = activeEmissionTexture
+          ? getLampEmissionTextureName(viewerSettingsRef.current.emissionColor)
+          : "pending";
+        container.dataset.emissionColor = viewerSettingsRef.current.emissionColor;
+        container.dataset.emissionSlot = lampEmissionMaterialsRef.current.length
+          ? lampEmissionMaterialsRef.current.map((material) => material.name).join(",")
+          : "missing";
+        onSceneReadyRef.current();
+      },
+      undefined,
+      () => {
+        if (!cancelled) {
+          container.dataset.homeSceneCornerLamp = `${activeLampModelName}-load-error`;
+          onSceneReadyRef.current();
+        }
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      dracoLoader.dispose();
+    };
+  }, [
+    homeSceneVersion,
+    selectedHomeLampSize,
+    selectedHomeScene,
+    selectedLampHeight,
+    selectedLampProduct,
+  ]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -3544,14 +3898,18 @@ export default function BikeScene({
     };
 
     const refreshEnvironment = () => {
+      const isHomeSceneActive = Boolean(selectedHomeSceneRef.current);
+
       applyViewerEnvironment({
         backgroundMode,
         backdropMaterial: backdropMaterialRef.current,
+        disableEnvironmentLighting: false,
         defaultEnvironmentMap: defaultEnvironmentMapRef.current,
         hdriBackgroundMap: hdriBackgroundMapRef.current,
         hdriDome: hdriDomeRef.current,
         hdriDomeMaterial: hdriDomeMaterialRef.current,
         hdriEnvironmentMap: hdriEnvironmentMapRef.current,
+        hideEnvironmentPresentation: isHomeSceneActive,
         scene,
         viewerSettings: viewerSettingsRef.current,
       });
@@ -3667,12 +4025,21 @@ export default function BikeScene({
       }
     }
 
+    const isHomeSceneActive = Boolean(selectedHomeScene);
+
     applyBloomPassSettings(
       bloomPassRef.current,
       bloomCompositePassRef.current,
       viewerSettings.bloom,
       viewerSettings.bloomRadius,
       viewerSettings.bloomThreshold,
+    );
+    applyDepthOfFieldPassSettings(
+      depthOfFieldPassRef.current,
+      cameraRef.current,
+      viewerSettings,
+      container?.clientWidth,
+      container?.clientHeight,
     );
     const activeEmissionTexture = getLampEmissionTexture(
       lampEmissionTexturesRef.current,
@@ -3697,6 +4064,16 @@ export default function BikeScene({
       containerRef.current.dataset.emissionSlot = lampEmissionMaterialsRef.current.length
         ? lampEmissionMaterialsRef.current.map((material) => material.name).join(",")
         : "missing";
+      if (isHomeSceneActive) {
+        containerRef.current.dataset.homeSceneHdri =
+          backgroundMode === "hdri" && hdriAsset ? "enabled" : "fallback";
+        containerRef.current.dataset.homeSceneLighting = "scene-01-custom";
+        containerRef.current.dataset.depthOfField = viewerSettings.depthOfField ? "enabled" : "disabled";
+      } else {
+        delete containerRef.current.dataset.homeSceneHdri;
+        delete containerRef.current.dataset.homeSceneLighting;
+        delete containerRef.current.dataset.depthOfField;
+      }
     }
 
     const scene = sceneRef.current;
@@ -3705,11 +4082,13 @@ export default function BikeScene({
       environmentColor = applyViewerEnvironment({
         backgroundMode,
         backdropMaterial: backdropMaterialRef.current,
+        disableEnvironmentLighting: false,
         defaultEnvironmentMap: defaultEnvironmentMapRef.current,
         hdriBackgroundMap: hdriBackgroundMapRef.current,
         hdriDome: hdriDomeRef.current,
         hdriDomeMaterial: hdriDomeMaterialRef.current,
         hdriEnvironmentMap: hdriEnvironmentMapRef.current,
+        hideEnvironmentPresentation: isHomeSceneActive,
         scene,
         viewerSettings,
       });
@@ -3743,7 +4122,16 @@ export default function BikeScene({
       rimLightRef.current.intensity = viewerSettings.rimIntensity;
     }
 
-    applyModelAmbientOcclusion(modelMaterialsRef.current, viewerSettings.modelAoIntensity);
+    if (isHomeSceneActive) {
+      applyModelAmbientOcclusion(homeSceneMaterialsRef.current, viewerSettings.aoIntensity);
+      applyModelAmbientOcclusion(modelMaterialsRef.current, viewerSettings.modelAoIntensity);
+    } else {
+      applyModelAmbientOcclusion(modelMaterialsRef.current, viewerSettings.modelAoIntensity);
+    }
+
+    if (studioSurfacesGroupRef.current) {
+      studioSurfacesGroupRef.current.visible = !isHomeSceneActive;
+    }
 
     if (domeMaterialRef.current) {
       const tintColor = backgroundMode === "color" ? viewerSettings.environmentColor : "#ffffff";
@@ -3758,7 +4146,7 @@ export default function BikeScene({
     }
 
     if (contactAoMaterialRef.current) {
-      contactAoMaterialRef.current.opacity = viewerSettings.aoIntensity;
+      contactAoMaterialRef.current.opacity = isHomeSceneActive ? 0 : viewerSettings.aoIntensity;
     }
 
     if (stageRingMaterialRef.current) {
@@ -3775,7 +4163,7 @@ export default function BikeScene({
       cameraRef.current.fov = viewerSettings.cameraFov;
       cameraRef.current.updateProjectionMatrix();
     }
-  }, [backgroundMode, viewerSettings]);
+  }, [backgroundMode, hdriAsset, selectedHomeScene, viewerSettings]);
 
   useEffect(() => {
     const scene = sceneRef.current;

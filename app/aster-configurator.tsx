@@ -24,6 +24,7 @@ type HdriAssetKind = "exr" | "hdr" | "image";
 type BackgroundMode = "color" | "hdri";
 type HomeSceneId = "scene-01";
 type LampProductId = "floor-lamp-4-heads" | "floor-lamp-3-heads" | "floor-lamp-2-heads";
+type HomeLampProductId = Exclude<LampProductId, "floor-lamp-2-heads">;
 type EmissionColorKey = "warm" | "neutral" | "cool";
 type CameraVectorTuple = [number, number, number];
 type HomeSceneCameraPose = {
@@ -113,6 +114,10 @@ type ViewerSettings = {
   bloom: number;
   bloomRadius: number;
   bloomThreshold: number;
+  depthOfField: boolean;
+  dofFocus: number;
+  dofAperture: number;
+  dofMaxBlur: number;
   emissionStrength: number;
   emissionColor: EmissionColorKey;
   hdriIntensity: number;
@@ -197,6 +202,11 @@ const lampHeightOptionsByProductAndSize: Partial<Record<LampProductId, Record<st
     S: ["A 60 CM", "B 60 CM"],
   },
 };
+const homeLampProductLabels: Record<HomeLampProductId, string> = {
+  "floor-lamp-3-heads": "Floor Lamp 3 Heads",
+  "floor-lamp-4-heads": "Floor Lamp 4 Heads",
+};
+const homeLampProductIds: HomeLampProductId[] = ["floor-lamp-4-heads", "floor-lamp-3-heads"];
 const homeSceneCameraStorageKey = "aster-home-scene-01-camera";
 const homeSceneCameraControls: Array<{
   action: Exclude<HomeSceneCameraAction, "save">;
@@ -270,6 +280,37 @@ function getSizeOptionsForLampProduct(lampProductId: LampProductId) {
   return sizeOptions.filter((option) => enabledSizeIds.includes(option.id));
 }
 
+type HomeProductVariant = {
+  colorLabel: string;
+  height: string;
+  id: string;
+  productId: HomeLampProductId;
+  productLabel: string;
+  sizeId: string;
+};
+
+const homeProductVariants: HomeProductVariant[] = homeLampProductIds.flatMap((productId) => {
+  return getSizeOptionsForLampProduct(productId).flatMap((size) => {
+    return getLampHeightOptions(size.id, productId).map((height) => ({
+      colorLabel: size.label,
+      height,
+      id: `${productId}-${size.id}-${height}`,
+      productId,
+      productLabel: homeLampProductLabels[productId],
+      sizeId: size.id,
+    }));
+  });
+});
+
+const defaultHomeProductVariantIndex = Math.max(
+  0,
+  homeProductVariants.findIndex((variant) => (
+    variant.productId === "floor-lamp-4-heads"
+    && variant.sizeId === "S"
+    && variant.height === "160 CM"
+  )),
+);
+
 const defaultViewerSettings: ViewerSettings = {
   ambientIntensity: 0,
   aoIntensity: 0,
@@ -278,6 +319,10 @@ const defaultViewerSettings: ViewerSettings = {
   bloomRadius: 0.3,
   bloomThreshold: 0.55,
   cameraFov: 35,
+  depthOfField: false,
+  dofAperture: 0.025,
+  dofFocus: 8,
+  dofMaxBlur: 0,
   emissionColor: "warm",
   emissionStrength: 4.5,
   environmentColor: "#ffffff",
@@ -297,6 +342,24 @@ const defaultViewerSettings: ViewerSettings = {
   shadows: true,
   toneMapping: "aces",
   vsmBlurSamples: 24,
+};
+
+const defaultHomeSceneSettings: ViewerSettings = {
+  ...defaultViewerSettings,
+  ambientIntensity: 0.35,
+  backdropGlow: 0,
+  depthOfField: false,
+  dofAperture: 0.025,
+  dofFocus: 8,
+  dofMaxBlur: 0,
+  environmentColor: "#ffffff",
+  fillIntensity: 0,
+  floorGlow: 0.55,
+  hdriIntensity: 1.15,
+  hdriRotation: 107,
+  hdriScale: 0.5,
+  keyIntensity: 0,
+  rimIntensity: 0,
 };
 
 const toneMappingLabels: Array<{ id: ToneMappingKey; label: string }> = [
@@ -552,6 +615,11 @@ const publicAsset = (path: string, options: { version?: boolean } = {}) => {
   const assetPath = `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 
   return options.version === false || path.endsWith("/") ? assetPath : appendAssetVersion(assetPath);
+};
+const homeSceneHdriAsset: HdriAsset = {
+  kind: "hdr",
+  name: "default.hdr",
+  url: publicAsset("hdri/home/default.hdr"),
 };
 const hdriPresets: HdriPreset[] = [
   {
@@ -882,12 +950,17 @@ export default function ConfiguratorClient() {
   const [isLampHeightOpen, setIsLampHeightOpen] = useState(false);
   const [selectedLampHeight, setSelectedLampHeight] = useState("90 CM");
   const [selectedHomeScene, setSelectedHomeScene] = useState<HomeSceneId | null>("scene-01");
+  const [selectedHomeProductVariantIndex, setSelectedHomeProductVariantIndex] = useState(
+    defaultHomeProductVariantIndex,
+  );
   const [homeSceneCameraResetKey, setHomeSceneCameraResetKey] = useState(0);
   const [homeSceneCameraPose, setHomeSceneCameraPose] = useState<HomeSceneCameraPose | null>(
     () => readStoredHomeSceneCameraPose(),
   );
   const [homeSceneCameraCommand, setHomeSceneCameraCommand] =
     useState<HomeSceneCameraCommand | null>(null);
+  const [homeSceneSettings, setHomeSceneSettings] =
+    useState<ViewerSettings>(defaultHomeSceneSettings);
   const [viewerSettings, setViewerSettings] = useState<ViewerSettings>(defaultViewerSettings);
 
   useEffect(() => {
@@ -1061,6 +1134,13 @@ export default function ConfiguratorClient() {
     }));
   };
 
+  const updateHomeSceneNumber = (key: NumericViewerSettingKey, value: number) => {
+    setHomeSceneSettings((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
+
   const updateToneMapping = (toneMapping: ToneMappingKey) => {
     setViewerSettings((current) => ({
       ...current,
@@ -1072,6 +1152,34 @@ export default function ConfiguratorClient() {
     setViewerSettings((current) => ({
       ...current,
       emissionColor,
+    }));
+  };
+
+  const updateHomeToneMapping = (toneMapping: ToneMappingKey) => {
+    setHomeSceneSettings((current) => ({
+      ...current,
+      toneMapping,
+    }));
+  };
+
+  const updateHomeEmissionColor = (emissionColor: EmissionColorKey) => {
+    setHomeSceneSettings((current) => ({
+      ...current,
+      emissionColor,
+    }));
+  };
+
+  const updateHomeSceneColor = (environmentColor: string) => {
+    setHomeSceneSettings((current) => ({
+      ...current,
+      environmentColor,
+    }));
+  };
+
+  const updateHomeSceneToggle = (key: "depthOfField" | "shadows", value: boolean) => {
+    setHomeSceneSettings((current) => ({
+      ...current,
+      [key]: value,
     }));
   };
 
@@ -1228,16 +1336,39 @@ export default function ConfiguratorClient() {
   const activeHdriPreset = backgroundMode === "hdri" && hdriAsset
     ? hdriPresets.find((preset) => preset.url === hdriAsset.url)
     : null;
+  const activeSceneBackgroundMode: BackgroundMode = activeHomeScene ? "hdri" : backgroundMode;
+  const activeSceneHdriAsset = activeHomeScene ? homeSceneHdriAsset : hdriAsset;
+  const activeSceneViewerSettings = useMemo<ViewerSettings>(() => {
+    if (!activeHomeScene) {
+      return viewerSettings;
+    }
+
+    return homeSceneSettings;
+  }, [activeHomeScene, homeSceneSettings, viewerSettings]);
+  const selectedHomeProductVariant =
+    homeProductVariants[selectedHomeProductVariantIndex] ?? homeProductVariants[0];
+  const activeSceneLampProduct = activeHomeScene
+    ? selectedHomeProductVariant.productId
+    : selectedLampProduct;
+  const activeSceneLampHeight = activeHomeScene
+    ? selectedHomeProductVariant.height
+    : selectedLampHeight;
+  const changeHomeProductVariant = (direction: -1 | 1) => {
+    setSelectedHomeScene("scene-01");
+    setSelectedHomeProductVariantIndex((current) => {
+      return (current + direction + homeProductVariants.length) % homeProductVariants.length;
+    });
+  };
 
   return (
     <main className={`configurator-shell intro-${introPhase}`} aria-busy={introPhase !== "ready"}>
       <section className="studio-area" aria-label="3D floor lamp preview">
         <Suspense fallback={<div className="bike-stage bike-stage-loading" aria-hidden="true" />}>
           <BikeScene
-            backgroundMode={backgroundMode}
+            backgroundMode={activeSceneBackgroundMode}
             config={config}
             focus={focus}
-            hdriAsset={hdriAsset}
+            hdriAsset={activeSceneHdriAsset}
             homeSceneCameraCommand={homeSceneCameraCommand}
             homeSceneCameraPose={homeSceneCameraPose}
             introPhase={introPhase}
@@ -1246,11 +1377,12 @@ export default function ConfiguratorClient() {
             onSceneReady={() => setSceneReady(true)}
             homeSceneCameraResetKey={homeSceneCameraResetKey}
             selectedHomeScene={activeHomeScene}
-            selectedLampHeight={selectedLampHeight}
-            selectedLampProduct={selectedLampProduct}
+            selectedHomeLampSize={selectedHomeProductVariant.sizeId}
+            selectedLampHeight={activeSceneLampHeight}
+            selectedLampProduct={activeSceneLampProduct}
             showLampModel={showLampModel}
             showHotspots={showHotspots}
-            viewerSettings={viewerSettings}
+            viewerSettings={activeSceneViewerSettings}
           />
         </Suspense>
 
@@ -1369,6 +1501,285 @@ export default function ConfiguratorClient() {
                 </span>
                 <em>{selectedHomeScene === "scene-01" ? "Selected" : "Select"}</em>
               </button>
+              <div className="home-product-carousel" aria-label="Home product selection">
+                <div className="section-title">
+                  <p>Product</p>
+                  <strong>{selectedHomeProductVariantIndex + 1}/{homeProductVariants.length}</strong>
+                </div>
+                <div className="home-product-card">
+                  <button
+                    aria-label="Previous product model"
+                    className="home-product-arrow home-product-arrow-prev"
+                    onClick={() => changeHomeProductVariant(-1)}
+                    type="button"
+                  >
+                    <span aria-hidden="true" />
+                  </button>
+                  <span className="home-product-copy">
+                    <strong>{selectedHomeProductVariant.productLabel}</strong>
+                    <small>{selectedHomeProductVariant.colorLabel} / {selectedHomeProductVariant.height}</small>
+                  </span>
+                  <button
+                    aria-label="Next product model"
+                    className="home-product-arrow home-product-arrow-next"
+                    onClick={() => changeHomeProductVariant(1)}
+                    type="button"
+                  >
+                    <span aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <div className="home-render-controls" aria-label="Scene 01 render controls">
+                <div className="section-title">
+                  <p>Scene 01 Setup</p>
+                  <div className="section-title-actions">
+                    <strong>Render</strong>
+                    <button
+                      className="studio-reset"
+                      onClick={() => setHomeSceneSettings(defaultHomeSceneSettings)}
+                      type="button"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+
+                <div className="studio-select-row">
+                  <label>
+                    <span>Tone Mapping</span>
+                    <select
+                      onChange={(event) => updateHomeToneMapping(event.currentTarget.value as ToneMappingKey)}
+                      value={homeSceneSettings.toneMapping}
+                    >
+                      {toneMappingLabels.map((mode) => (
+                        <option key={mode.id} value={mode.id}>
+                          {mode.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="studio-group">
+                  <p>Post Processing</p>
+                  <StudioRange
+                    label="Exposure"
+                    max={2.4}
+                    min={0.2}
+                    onChange={(value) => updateHomeSceneNumber("exposure", value)}
+                    step={0.01}
+                    value={homeSceneSettings.exposure}
+                  />
+                  <StudioRange
+                    label="Bloom"
+                    max={3}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("bloom", value)}
+                    step={0.01}
+                    value={homeSceneSettings.bloom}
+                  />
+                  <StudioRange
+                    label="Spread"
+                    max={1}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("bloomRadius", value)}
+                    step={0.01}
+                    value={homeSceneSettings.bloomRadius}
+                  />
+                  <StudioRange
+                    label="Threshold"
+                    max={1}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("bloomThreshold", value)}
+                    step={0.01}
+                    value={homeSceneSettings.bloomThreshold}
+                  />
+                  <StudioRange
+                    label="Emission Strength"
+                    max={8}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("emissionStrength", value)}
+                    step={0.1}
+                    value={homeSceneSettings.emissionStrength}
+                  />
+                  <StudioEmissionColorRadios
+                    onChange={updateHomeEmissionColor}
+                    value={homeSceneSettings.emissionColor}
+                  />
+                </div>
+
+                <div className="studio-group">
+                  <p>Depth Of Field</p>
+                  <label className="studio-toggle">
+                    <span>Enable DOF</span>
+                    <input
+                      checked={homeSceneSettings.depthOfField}
+                      onChange={(event) => updateHomeSceneToggle("depthOfField", event.currentTarget.checked)}
+                      type="checkbox"
+                    />
+                  </label>
+                  <StudioRange
+                    label="Focus Distance"
+                    max={30}
+                    min={0.2}
+                    onChange={(value) => updateHomeSceneNumber("dofFocus", value)}
+                    step={0.1}
+                    value={homeSceneSettings.dofFocus}
+                  />
+                  <StudioRange
+                    label="Aperture"
+                    max={0.12}
+                    min={0.001}
+                    onChange={(value) => updateHomeSceneNumber("dofAperture", value)}
+                    step={0.001}
+                    value={homeSceneSettings.dofAperture}
+                  />
+                  <StudioRange
+                    label="Blur"
+                    max={0.04}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("dofMaxBlur", value)}
+                    step={0.001}
+                    value={homeSceneSettings.dofMaxBlur}
+                  />
+                </div>
+
+                <div className="studio-group">
+                  <p>Lighting</p>
+                  <StudioRange
+                    label="Ambient Light"
+                    max={3}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("ambientIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.ambientIntensity}
+                  />
+                  <StudioRange
+                    label="Key Light"
+                    max={5}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("keyIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.keyIntensity}
+                  />
+                  <StudioRange
+                    label="Fill Light"
+                    max={5}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("fillIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.fillIntensity}
+                  />
+                  <StudioRange
+                    label="Rim Light"
+                    max={5}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("rimIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.rimIntensity}
+                  />
+                </div>
+
+                <div className="studio-group">
+                  <p>Ambient Occlusion</p>
+                  <StudioRange
+                    label="Scene AO"
+                    max={3}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("aoIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.aoIntensity}
+                  />
+                  <StudioRange
+                    label="Model AO"
+                    max={3}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("modelAoIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.modelAoIntensity}
+                  />
+                </div>
+
+                <div className="studio-group">
+                  <p>Shadow</p>
+                  <label className="studio-toggle">
+                    <span>Shadows</span>
+                    <input
+                      checked={homeSceneSettings.shadows}
+                      onChange={(event) => updateHomeSceneToggle("shadows", event.currentTarget.checked)}
+                      type="checkbox"
+                    />
+                  </label>
+                  <StudioRange
+                    label="Shadow Softness"
+                    max={32}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("vsmBlurSamples", value)}
+                    step={1}
+                    value={homeSceneSettings.vsmBlurSamples}
+                  />
+                </div>
+
+                <div className="studio-group">
+                  <p>HDRI</p>
+                  <StudioRange
+                    label="HDRI Intensity"
+                    max={4}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("hdriIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.hdriIntensity}
+                  />
+                  <StudioRange
+                    label="HDRI Scale"
+                    max={2.5}
+                    min={0.5}
+                    onChange={(value) => updateHomeSceneNumber("hdriScale", value)}
+                    step={0.01}
+                    suffix="x"
+                    value={homeSceneSettings.hdriScale}
+                  />
+                  <StudioRange
+                    label="HDRI Rotation"
+                    max={180}
+                    min={-180}
+                    onChange={(value) => updateHomeSceneNumber("hdriRotation", value)}
+                    step={1}
+                    suffix=" deg"
+                    value={homeSceneSettings.hdriRotation}
+                  />
+                  <StudioColorPalette
+                    active={true}
+                    onChange={updateHomeSceneColor}
+                    value={homeSceneSettings.environmentColor}
+                  />
+                  <StudioRange
+                    label="Environment Intensity"
+                    max={3}
+                    min={0}
+                    onChange={(value) => updateHomeSceneNumber("environmentIntensity", value)}
+                    step={0.01}
+                    value={homeSceneSettings.environmentIntensity}
+                  />
+                  <StudioRange
+                    label="Environment Rotation"
+                    max={180}
+                    min={-180}
+                    onChange={(value) => updateHomeSceneNumber("environmentRotation", value)}
+                    step={1}
+                    suffix=" deg"
+                    value={homeSceneSettings.environmentRotation}
+                  />
+                  <StudioRange
+                    label="Environment Contrast"
+                    max={1.7}
+                    min={0.7}
+                    onChange={(value) => updateHomeSceneNumber("environmentContrast", value)}
+                    step={0.01}
+                    value={homeSceneSettings.environmentContrast}
+                  />
+                </div>
+              </div>
               <div className="home-camera-controls" aria-label="Home scene camera controls">
                 <div className="section-title">
                   <p>Camera</p>
