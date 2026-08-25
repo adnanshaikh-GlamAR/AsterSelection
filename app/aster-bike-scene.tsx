@@ -672,10 +672,11 @@ const lampEmissionColors: Record<EmissionColorKey, string> = {
   warm: "#fff4da",
 };
 const startupCameraDistance = 4.85;
-const startupCameraX = 0.86;
+const startupCameraX = 0;
 const mobileStartupCameraX = 0;
 const mobileCameraBreakpoint = 900;
 const maxProductCompositionShiftRatio = 0.26;
+const productCompositionOpenAreaRatio = 0.42;
 const startupCameraHeightOffset = 0.48;
 const startupLookHeightOffset = 0.02;
 const productViewportFit = 2;
@@ -747,7 +748,7 @@ function getProductCompositionShiftRatio(container: HTMLElement) {
     width * 0.45,
     width,
   );
-  const desiredOriginX = visibleWidth * 0.5;
+  const desiredOriginX = visibleWidth * productCompositionOpenAreaRatio;
   const shiftPx = Math.max(0, width * 0.5 - desiredOriginX);
 
   return THREE.MathUtils.clamp(shiftPx / width, 0, maxProductCompositionShiftRatio);
@@ -1826,7 +1827,7 @@ function prepareViewportModel(model: THREE.Object3D, anisotropy = 1, cameraX = s
   return { camera, group, look, sourceCenter: center };
 }
 
-function prepareProductModelForViewport(model: THREE.Object3D, anisotropy = 1, cameraX = startupCameraX) {
+function prepareProductModelForViewport(model: THREE.Object3D, anisotropy = 1) {
   prepareModelForViewport(model, anisotropy);
 
   const bounds = new THREE.Box3().setFromObject(model);
@@ -1841,9 +1842,10 @@ function prepareProductModelForViewport(model: THREE.Object3D, anisotropy = 1, c
   group.scale.setScalar(scale);
   group.position.y = modelGroundY - (bounds.min.y - center.y) * scale;
 
-  const look = new THREE.Vector3(cameraX, group.position.y + productLookHeightOffset, 0);
+  // Keep the orbit target on the lamp center; off-axis projection handles desktop panel framing.
+  const look = new THREE.Vector3(0, group.position.y + productLookHeightOffset, 0);
   const camera = new THREE.Vector3(
-    cameraX,
+    0,
     group.position.y + productCameraHeightOffset,
     startupCameraDistance,
   );
@@ -2692,7 +2694,7 @@ export default function BikeScene({
       }
 
       applyCameraComposition(camera, container, Boolean(selectedHomeScene));
-      queueCameraCompositionRefresh();
+      queueCameraCompositionRefresh(180);
       controlsRef.current?.update();
     };
 
@@ -2708,7 +2710,15 @@ export default function BikeScene({
       window.cancelAnimationFrame(secondFrame);
       window.clearTimeout(timer);
     };
-  }, [focus, selectedHomeScene, selectedHomeLampSize, selectedLampHeight, selectedLampProduct]);
+  }, [
+    focus,
+    introPhase,
+    queueCameraCompositionRefresh,
+    selectedHomeScene,
+    selectedHomeLampSize,
+    selectedLampHeight,
+    selectedLampProduct,
+  ]);
 
   useEffect(() => {
     if (!showHotspots) {
@@ -3201,7 +3211,7 @@ export default function BikeScene({
       camera.fov = clientWidth < 560 ? Math.max(viewerSettingsRef.current.cameraFov, 40) : viewerSettingsRef.current.cameraFov;
       camera.aspect = clientWidth / Math.max(clientHeight, 1);
       applyCameraComposition(camera, container, Boolean(selectedHomeSceneRef.current));
-      queueCameraCompositionRefresh();
+      queueCameraCompositionRefresh(180);
       applyDepthOfFieldPassSettings(
         depthOfFieldPass,
         camera,
@@ -3823,7 +3833,6 @@ export default function BikeScene({
         const { camera: modelCamera, group, look } = prepareProductModelForViewport(
           gltf.scene,
           anisotropyRef.current,
-          getStartupCameraX(container.clientWidth || window.innerWidth),
         );
         modelLoadedRef.current = true;
         fallbackRef.current = false;
@@ -3867,7 +3876,7 @@ export default function BikeScene({
         camera.position.copy(modelCamera);
         controls.target.copy(look);
         applyCameraComposition(camera, container, false);
-        queueCameraCompositionRefresh();
+        queueCameraCompositionRefresh(180);
         controls.update();
         onSceneReadyRef.current();
       },
@@ -4260,14 +4269,14 @@ export default function BikeScene({
 
     if (cameraRef.current) {
       cameraRef.current.fov = viewerSettings.cameraFov;
-      if (container) {
-        applyCameraComposition(cameraRef.current, container, isHomeSceneActive);
-        queueCameraCompositionRefresh();
+      if (containerRef.current) {
+        applyCameraComposition(cameraRef.current, containerRef.current, isHomeSceneActive);
+        queueCameraCompositionRefresh(180);
       } else {
         cameraRef.current.updateProjectionMatrix();
       }
     }
-  }, [backgroundMode, hdriAsset, selectedHomeScene, viewerSettings]);
+  }, [backgroundMode, hdriAsset, queueCameraCompositionRefresh, selectedHomeScene, viewerSettings]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -4299,7 +4308,7 @@ export default function BikeScene({
             containerRef.current,
             Boolean(selectedHomeSceneRef.current),
           );
-          queueCameraCompositionRefresh();
+          queueCameraCompositionRefresh(180);
         }
         controlsRef.current.update();
       }
@@ -4336,11 +4345,11 @@ export default function BikeScene({
           containerRef.current,
           Boolean(selectedHomeSceneRef.current),
         );
-        queueCameraCompositionRefresh();
+        queueCameraCompositionRefresh(180);
       }
       controlsRef.current.update();
     }
-  }, [focus]);
+  }, [focus, queueCameraCompositionRefresh]);
 
   return (
     <div
