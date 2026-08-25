@@ -6,7 +6,7 @@ import { appendAssetVersion } from "./asset-version";
 const BikeScene = lazy(() => import("./aster-bike-scene"));
 
 type StepId = "home" | "size" | "components" | "summary" | "light" | "studio";
-type StageId = "home" | "build" | "review" | "light" | "studio";
+type StageId = "home" | "build" | "review" | "light";
 type IntroPhase = "loading" | "cinematic" | "ready";
 type ComponentKey =
   | "groupset"
@@ -60,10 +60,9 @@ type PaintOption = {
 
 const stageTabOffsets: Record<StageId, string> = {
   build: "0%",
-  home: "100%",
-  review: "200%",
-  light: "300%",
-  studio: "400%",
+  light: "100%",
+  home: "200%",
+  review: "300%",
 };
 
 type ComponentOption = {
@@ -380,6 +379,12 @@ const emissionColorOptions: Array<{ color: string; id: EmissionColorKey; label: 
 
 const getSizeLabel = (sizeId: string) => {
   return sizeOptions.find((size) => size.id === sizeId)?.label ?? sizeId;
+};
+
+const getLampHeightDimensionText = (lampHeight: string) => {
+  const heightMatch = lampHeight.match(/(\d+(?:\.\d+)?)\s*cm/i);
+
+  return heightMatch ? `${heightMatch[1]}cm` : "90cm";
 };
 
 const componentGroups: ComponentGroup[] = [
@@ -964,6 +969,12 @@ export default function ConfiguratorClient() {
   const [viewerSettings, setViewerSettings] = useState<ViewerSettings>(defaultViewerSettings);
 
   useEffect(() => {
+    if (activeStep === "studio") {
+      setActiveStep("light");
+    }
+  }, [activeStep]);
+
+  useEffect(() => {
     if (introPhase !== "loading") {
       return undefined;
     }
@@ -1012,9 +1023,7 @@ export default function ConfiguratorClient() {
         ? "review"
         : activeStep === "light"
           ? "light"
-          : activeStep === "studio"
-            ? "studio"
-            : "build";
+          : "build";
   const stageTabStyle = {
     "--active-tab-offset": stageTabOffsets[activeStage],
   } as CSSProperties;
@@ -1029,10 +1038,12 @@ export default function ConfiguratorClient() {
           : "default";
 
   const visibleComponentOrder: ComponentKey[] = [];
+  const selectedLampDimensions = `H: ${getLampHeightDimensionText(selectedLampHeight)} / B: 30cm`;
 
   const summaryRows = [
     ["Model", modelName],
     ["Size", getSizeLabel(config.size)],
+    ["Dimensions", selectedLampDimensions],
     ...visibleComponentOrder
       .map((groupKey) => getComponentGroup(groupKey))
       .map((group) => [
@@ -1218,18 +1229,20 @@ export default function ConfiguratorClient() {
       return;
     }
 
-    if (activeStep === "light" || activeStep === "studio") {
-      setStatus(activeStep === "light" ? "Light settings applied." : "Studio renderer settings applied.");
+    if (activeStep === "light") {
+      setSelectedHomeScene("scene-01");
+      setHomeSceneCameraResetKey((current) => current + 1);
+      setActiveStep("home");
       return;
     }
 
     setEditingGroup(null);
     if (activeStep === "home") {
-      setActiveStep("components");
+      setActiveStep("summary");
     } else if (activeStep === "size") {
       setActiveStep("components");
     } else {
-      setActiveStep("summary");
+      setActiveStep("light");
     }
   };
 
@@ -1239,14 +1252,12 @@ export default function ConfiguratorClient() {
       return;
     }
 
-    if (activeStep === "studio") {
-      setActiveStep("light");
-    } else if (activeStep === "light") {
-      setActiveStep("summary");
-    } else if (activeStep === "summary") {
+    if (activeStep === "light") {
       setActiveStep("components");
-    } else if (activeStep === "home") {
+    } else if (activeStep === "summary") {
       setActiveStep("home");
+    } else if (activeStep === "home") {
+      setActiveStep("light");
     } else {
       setActiveStep("components");
     }
@@ -1255,11 +1266,6 @@ export default function ConfiguratorClient() {
   const setStage = (stage: StageId) => {
     setEditingGroup(null);
     setStatus("");
-
-    if (stage === "studio") {
-      setActiveStep("studio");
-      return;
-    }
 
     if (stage === "light") {
       setActiveStep("light");
@@ -1447,6 +1453,13 @@ export default function ConfiguratorClient() {
             Build
           </button>
           <button
+            className={activeStage === "light" ? "active" : ""}
+            onClick={() => setStage("light")}
+            type="button"
+          >
+            Light
+          </button>
+          <button
             className={activeStage === "home" ? "active" : ""}
             onClick={() => setStage("home")}
             type="button"
@@ -1459,20 +1472,6 @@ export default function ConfiguratorClient() {
             type="button"
           >
             Review
-          </button>
-          <button
-            className={activeStage === "light" ? "active" : ""}
-            onClick={() => setStage("light")}
-            type="button"
-          >
-            Light
-          </button>
-          <button
-            className={activeStage === "studio" ? "active" : ""}
-            onClick={() => setStage("studio")}
-            type="button"
-          >
-            Studio
           </button>
         </nav>
 
@@ -2156,11 +2155,9 @@ export default function ConfiguratorClient() {
             <button className="primary-action" onClick={nextStep} type="button">
               {activeStep === "summary"
                 ? "Buy it now"
-                : activeStep === "light" || activeStep === "studio"
-                  ? "Done"
-                  : editingGroup
-                    ? "Confirm"
-                    : "Next"}
+                : editingGroup
+                  ? "Confirm"
+                  : "Next"}
             </button>
           </div>
         </footer>
