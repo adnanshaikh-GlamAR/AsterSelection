@@ -315,15 +315,15 @@ const defaultViewerSettings: ViewerSettings = {
   aoIntensity: 0,
   backdropGlow: 0,
   bloom: 0.5,
-  bloomRadius: 0.3,
-  bloomThreshold: 0.55,
+  bloomRadius: 1,
+  bloomThreshold: 1,
   cameraFov: 35,
   depthOfField: false,
   dofAperture: 0.025,
   dofFocus: 8,
   dofMaxBlur: 0,
   emissionColor: "warm",
-  emissionStrength: 4.5,
+  emissionStrength: 8,
   environmentColor: "#ffffff",
   environmentContrast: 1.08,
   environmentIntensity: 1.06,
@@ -347,10 +347,13 @@ const defaultHomeSceneSettings: ViewerSettings = {
   ...defaultViewerSettings,
   ambientIntensity: 0.35,
   backdropGlow: 0,
+  bloomRadius: 0.3,
+  bloomThreshold: 0.55,
   depthOfField: false,
   dofAperture: 0.025,
   dofFocus: 8,
   dofMaxBlur: 0,
+  emissionStrength: 4.5,
   environmentColor: "#ffffff",
   fillIntensity: 0,
   floorGlow: 0.55,
@@ -1974,36 +1977,12 @@ export default function ConfiguratorClient() {
               <div className="studio-group">
                 <p>Bloom</p>
                 <StudioRange
-                  label="Bloom"
+                  label="Bloom Intensity"
                   max={3}
                   min={0}
                   onChange={(value) => updateViewerNumber("bloom", value)}
                   step={0.01}
                   value={viewerSettings.bloom}
-                />
-                <StudioRange
-                  label="Spread"
-                  max={1}
-                  min={0}
-                  onChange={(value) => updateViewerNumber("bloomRadius", value)}
-                  step={0.01}
-                  value={viewerSettings.bloomRadius}
-                />
-                <StudioRange
-                  label="Threshold"
-                  max={1}
-                  min={0}
-                  onChange={(value) => updateViewerNumber("bloomThreshold", value)}
-                  step={0.01}
-                  value={viewerSettings.bloomThreshold}
-                />
-                <StudioRange
-                  label="Emission Strength"
-                  max={8}
-                  min={0}
-                  onChange={(value) => updateViewerNumber("emissionStrength", value)}
-                  step={0.1}
-                  value={viewerSettings.emissionStrength}
                 />
                 <StudioEmissionColorRadios
                   onChange={updateEmissionColor}
