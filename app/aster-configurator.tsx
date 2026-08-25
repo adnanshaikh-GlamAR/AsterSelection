@@ -31,22 +31,6 @@ type HomeSceneCameraPose = {
   camera: CameraVectorTuple;
   look: CameraVectorTuple;
 };
-type HomeSceneCameraAction =
-  | "pan-left"
-  | "pan-right"
-  | "pan-up"
-  | "pan-down"
-  | "orbit-left"
-  | "orbit-right"
-  | "tilt-up"
-  | "tilt-down"
-  | "zoom-in"
-  | "zoom-out"
-  | "save";
-type HomeSceneCameraCommand = {
-  action: HomeSceneCameraAction;
-  id: number;
-};
 
 type PaintOption = {
   id: string;
@@ -206,23 +190,7 @@ const homeLampProductLabels: Record<HomeLampProductId, string> = {
   "floor-lamp-4-heads": "Floor Lamp 4 Heads",
 };
 const homeLampProductIds: HomeLampProductId[] = ["floor-lamp-4-heads", "floor-lamp-3-heads"];
-const homeSceneCameraStorageKey = "aster-home-scene-01-hdri-dome-camera";
-const homeSceneCameraControls: Array<{
-  action: Exclude<HomeSceneCameraAction, "save">;
-  label: string;
-  title: string;
-}> = [
-  { action: "pan-left", label: "←", title: "Move camera left" },
-  { action: "pan-right", label: "→", title: "Move camera right" },
-  { action: "pan-up", label: "↑", title: "Move camera up" },
-  { action: "pan-down", label: "↓", title: "Move camera down" },
-  { action: "orbit-left", label: "↺", title: "Rotate camera left" },
-  { action: "orbit-right", label: "↻", title: "Rotate camera right" },
-  { action: "tilt-up", label: "T+", title: "Tilt camera up" },
-  { action: "tilt-down", label: "T-", title: "Tilt camera down" },
-  { action: "zoom-in", label: "+", title: "Move camera closer" },
-  { action: "zoom-out", label: "-", title: "Move camera farther" },
-];
+const homeSceneCameraStorageKey = "aster-home-scene-01-build-framing-camera";
 
 function isCameraVectorTuple(value: unknown): value is CameraVectorTuple {
   return Array.isArray(value)
@@ -347,21 +315,22 @@ const defaultHomeSceneSettings: ViewerSettings = {
   ...defaultViewerSettings,
   ambientIntensity: 0.35,
   backdropGlow: 0,
-  bloomRadius: 0.3,
-  bloomThreshold: 0.55,
+  bloomRadius: 1,
+  bloomThreshold: 1,
   depthOfField: false,
   dofAperture: 0.025,
   dofFocus: 8,
   dofMaxBlur: 0,
-  emissionStrength: 4.5,
+  emissionStrength: 8,
   environmentColor: "#ffffff",
   fillIntensity: 0,
   floorGlow: 0.55,
   hdriIntensity: 1.15,
   hdriRotation: 107,
-  hdriScale: 1,
+  hdriScale: 0.5,
   keyIntensity: 0,
   rimIntensity: 0,
+  toneMapping: "aces",
 };
 
 const toneMappingLabels: Array<{ id: ToneMappingKey; label: string }> = [
@@ -965,17 +934,9 @@ export default function ConfiguratorClient() {
   const [homeSceneCameraPose, setHomeSceneCameraPose] = useState<HomeSceneCameraPose | null>(
     () => readStoredHomeSceneCameraPose(),
   );
-  const [homeSceneCameraCommand, setHomeSceneCameraCommand] =
-    useState<HomeSceneCameraCommand | null>(null);
   const [homeSceneSettings, setHomeSceneSettings] =
     useState<ViewerSettings>(defaultHomeSceneSettings);
   const [viewerSettings, setViewerSettings] = useState<ViewerSettings>(defaultViewerSettings);
-
-  useEffect(() => {
-    if (activeStep === "studio") {
-      setActiveStep("light");
-    }
-  }, [activeStep]);
 
   useEffect(() => {
     if (introPhase !== "loading") {
@@ -1169,31 +1130,10 @@ export default function ConfiguratorClient() {
     }));
   };
 
-  const updateHomeToneMapping = (toneMapping: ToneMappingKey) => {
-    setHomeSceneSettings((current) => ({
-      ...current,
-      toneMapping,
-    }));
-  };
-
   const updateHomeEmissionColor = (emissionColor: EmissionColorKey) => {
     setHomeSceneSettings((current) => ({
       ...current,
       emissionColor,
-    }));
-  };
-
-  const updateHomeSceneColor = (environmentColor: string) => {
-    setHomeSceneSettings((current) => ({
-      ...current,
-      environmentColor,
-    }));
-  };
-
-  const updateHomeSceneToggle = (key: "depthOfField" | "shadows", value: boolean) => {
-    setHomeSceneSettings((current) => ({
-      ...current,
-      [key]: value,
     }));
   };
 
@@ -1310,28 +1250,10 @@ export default function ConfiguratorClient() {
     window.localStorage.removeItem(homeSceneCameraStorageKey);
   }, []);
 
-  const requestHomeSceneCameraAction = (action: HomeSceneCameraAction) => {
-    setSelectedHomeScene("scene-01");
-    setActiveStep("home");
-    setStatus("");
-    setHomeSceneCameraCommand((current) => ({
-      action,
-      id: (current?.id ?? 0) + 1,
-    }));
-  };
-
   const saveHomeSceneCameraPose = useCallback((pose: HomeSceneCameraPose) => {
     storeHomeSceneCameraPose(pose);
     setStatus("Home camera saved.");
   }, [storeHomeSceneCameraPose]);
-
-  const resetHomeSceneCameraPose = () => {
-    storeHomeSceneCameraPose(null);
-    setSelectedHomeScene("scene-01");
-    setActiveStep("home");
-    setHomeSceneCameraResetKey((current) => current + 1);
-    setStatus("Home camera reset.");
-  };
 
   const openArExperience = () => {
     if (typeof window !== "undefined" && window.innerWidth <= mobileCameraBreakpoint) {
@@ -1378,7 +1300,7 @@ export default function ConfiguratorClient() {
             config={config}
             focus={focus}
             hdriAsset={activeSceneHdriAsset}
-            homeSceneCameraCommand={homeSceneCameraCommand}
+            homeSceneCameraCommand={null}
             homeSceneCameraPose={homeSceneCameraPose}
             introPhase={introPhase}
             onIntroComplete={() => setIntroPhase("ready")}
@@ -1546,179 +1468,19 @@ export default function ConfiguratorClient() {
                   </div>
                 </div>
 
-                <div className="studio-select-row">
-                  <label>
-                    <span>Tone Mapping</span>
-                    <select
-                      onChange={(event) => updateHomeToneMapping(event.currentTarget.value as ToneMappingKey)}
-                      value={homeSceneSettings.toneMapping}
-                    >
-                      {toneMappingLabels.map((mode) => (
-                        <option key={mode.id} value={mode.id}>
-                          {mode.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
                 <div className="studio-group">
                   <p>Post Processing</p>
                   <StudioRange
-                    label="Exposure"
-                    max={2.4}
-                    min={0.2}
-                    onChange={(value) => updateHomeSceneNumber("exposure", value)}
-                    step={0.01}
-                    value={homeSceneSettings.exposure}
-                  />
-                  <StudioRange
-                    label="Bloom"
+                    label="Bloom Intensity"
                     max={3}
                     min={0}
                     onChange={(value) => updateHomeSceneNumber("bloom", value)}
                     step={0.01}
                     value={homeSceneSettings.bloom}
                   />
-                  <StudioRange
-                    label="Spread"
-                    max={1}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("bloomRadius", value)}
-                    step={0.01}
-                    value={homeSceneSettings.bloomRadius}
-                  />
-                  <StudioRange
-                    label="Threshold"
-                    max={1}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("bloomThreshold", value)}
-                    step={0.01}
-                    value={homeSceneSettings.bloomThreshold}
-                  />
-                  <StudioRange
-                    label="Emission Strength"
-                    max={8}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("emissionStrength", value)}
-                    step={0.1}
-                    value={homeSceneSettings.emissionStrength}
-                  />
                   <StudioEmissionColorRadios
                     onChange={updateHomeEmissionColor}
                     value={homeSceneSettings.emissionColor}
-                  />
-                </div>
-
-                <div className="studio-group">
-                  <p>Depth Of Field</p>
-                  <label className="studio-toggle">
-                    <span>Enable DOF</span>
-                    <input
-                      checked={homeSceneSettings.depthOfField}
-                      onChange={(event) => updateHomeSceneToggle("depthOfField", event.currentTarget.checked)}
-                      type="checkbox"
-                    />
-                  </label>
-                  <StudioRange
-                    label="Focus Distance"
-                    max={30}
-                    min={0.2}
-                    onChange={(value) => updateHomeSceneNumber("dofFocus", value)}
-                    step={0.1}
-                    value={homeSceneSettings.dofFocus}
-                  />
-                  <StudioRange
-                    label="Aperture"
-                    max={0.12}
-                    min={0.001}
-                    onChange={(value) => updateHomeSceneNumber("dofAperture", value)}
-                    step={0.001}
-                    value={homeSceneSettings.dofAperture}
-                  />
-                  <StudioRange
-                    label="Blur"
-                    max={0.04}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("dofMaxBlur", value)}
-                    step={0.001}
-                    value={homeSceneSettings.dofMaxBlur}
-                  />
-                </div>
-
-                <div className="studio-group">
-                  <p>Lighting</p>
-                  <StudioRange
-                    label="Ambient Light"
-                    max={3}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("ambientIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.ambientIntensity}
-                  />
-                  <StudioRange
-                    label="Key Light"
-                    max={5}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("keyIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.keyIntensity}
-                  />
-                  <StudioRange
-                    label="Fill Light"
-                    max={5}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("fillIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.fillIntensity}
-                  />
-                  <StudioRange
-                    label="Rim Light"
-                    max={5}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("rimIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.rimIntensity}
-                  />
-                </div>
-
-                <div className="studio-group">
-                  <p>Ambient Occlusion</p>
-                  <StudioRange
-                    label="Scene AO"
-                    max={3}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("aoIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.aoIntensity}
-                  />
-                  <StudioRange
-                    label="Model AO"
-                    max={3}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("modelAoIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.modelAoIntensity}
-                  />
-                </div>
-
-                <div className="studio-group">
-                  <p>Shadow</p>
-                  <label className="studio-toggle">
-                    <span>Shadows</span>
-                    <input
-                      checked={homeSceneSettings.shadows}
-                      onChange={(event) => updateHomeSceneToggle("shadows", event.currentTarget.checked)}
-                      type="checkbox"
-                    />
-                  </label>
-                  <StudioRange
-                    label="Shadow Softness"
-                    max={32}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("vsmBlurSamples", value)}
-                    step={1}
-                    value={homeSceneSettings.vsmBlurSamples}
                   />
                 </div>
 
@@ -1733,15 +1495,6 @@ export default function ConfiguratorClient() {
                     value={homeSceneSettings.hdriIntensity}
                   />
                   <StudioRange
-                    label="HDRI Scale"
-                    max={2.5}
-                    min={0.5}
-                    onChange={(value) => updateHomeSceneNumber("hdriScale", value)}
-                    step={0.01}
-                    suffix="x"
-                    value={homeSceneSettings.hdriScale}
-                  />
-                  <StudioRange
                     label="HDRI Rotation"
                     max={180}
                     min={-180}
@@ -1750,72 +1503,6 @@ export default function ConfiguratorClient() {
                     suffix=" deg"
                     value={homeSceneSettings.hdriRotation}
                   />
-                  <StudioColorPalette
-                    active={true}
-                    onChange={updateHomeSceneColor}
-                    value={homeSceneSettings.environmentColor}
-                  />
-                  <StudioRange
-                    label="Environment Intensity"
-                    max={3}
-                    min={0}
-                    onChange={(value) => updateHomeSceneNumber("environmentIntensity", value)}
-                    step={0.01}
-                    value={homeSceneSettings.environmentIntensity}
-                  />
-                  <StudioRange
-                    label="Environment Rotation"
-                    max={180}
-                    min={-180}
-                    onChange={(value) => updateHomeSceneNumber("environmentRotation", value)}
-                    step={1}
-                    suffix=" deg"
-                    value={homeSceneSettings.environmentRotation}
-                  />
-                  <StudioRange
-                    label="Environment Contrast"
-                    max={1.7}
-                    min={0.7}
-                    onChange={(value) => updateHomeSceneNumber("environmentContrast", value)}
-                    step={0.01}
-                    value={homeSceneSettings.environmentContrast}
-                  />
-                </div>
-              </div>
-              <div className="home-camera-controls" aria-label="Home scene camera controls">
-                <div className="section-title">
-                  <p>Camera</p>
-                  <strong>{homeSceneCameraPose ? "Custom" : "Default"}</strong>
-                </div>
-                <div className="home-camera-grid">
-                  {homeSceneCameraControls.map((control) => (
-                    <button
-                      aria-label={control.title}
-                      className="home-camera-button"
-                      key={control.action}
-                      onClick={() => requestHomeSceneCameraAction(control.action)}
-                      title={control.title}
-                      type="button"
-                    >
-                      {control.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="home-camera-actions">
-                  <button
-                    className="home-camera-save"
-                    onClick={() => requestHomeSceneCameraAction("save")}
-                    type="button"
-                  >
-                    Set Camera
-                  </button>
-                  <button
-                    className="home-camera-reset"
-                    onClick={resetHomeSceneCameraPose}
-                    type="button"
-                  >
-                    Reset
-                  </button>
                 </div>
               </div>
             </section>

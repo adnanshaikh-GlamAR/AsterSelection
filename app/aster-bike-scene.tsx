@@ -832,8 +832,8 @@ function getHomeSceneCameraPose(savedPose?: HomeSceneCameraPose | null) {
   }
 
   return {
-    camera: new THREE.Vector3(1.42, modelGroundY + 1.5, 4.35),
-    look: new THREE.Vector3(0.46, modelGroundY + 1.08, -0.58),
+    camera: new THREE.Vector3(0, modelGroundY + productCameraHeightOffset, startupCameraDistance),
+    look: new THREE.Vector3(0, modelGroundY + productLookHeightOffset, 0),
   };
 }
 
@@ -1875,6 +1875,10 @@ function prepareHomeSceneModel(model: THREE.Object3D, anisotropy = 1) {
   return group;
 }
 
+function isHdriDomeHomeScene(homeScene: THREE.Object3D | null | undefined) {
+  return Boolean(homeScene?.name.endsWith("-hdri-dome"));
+}
+
 function getIntersectionWorldNormal(intersection: THREE.Intersection) {
   if (!intersection.face) {
     return null;
@@ -2559,6 +2563,7 @@ export default function BikeScene({
   const dimensionHotspotsRef = useRef(dimensionHotspots);
   const shouldShowDimensionsRef = useRef(shouldShowDimensions);
   const selectedHomeSceneRef = useRef(selectedHomeScene);
+  const homeSceneCameraPoseRef = useRef(homeSceneCameraPose);
   const compositionRefreshFramesRef = useRef(0);
   const [activeHotspotId, setActiveHotspotId] = useState<string | null>(null);
   const paintRef = useRef(config.paint);
@@ -2615,6 +2620,10 @@ export default function BikeScene({
     compositionRefreshFramesRef.current = Math.max(compositionRefreshFramesRef.current, frames);
   }, []);
 
+  const shouldUseSceneCameraComposition = useCallback(() => (
+    Boolean(selectedHomeSceneRef.current) && !isHdriDomeHomeScene(homeSceneRef.current)
+  ), []);
+
   const refreshHotspotBounds = () => {
     const bike = bikeRef.current;
 
@@ -2647,13 +2656,13 @@ export default function BikeScene({
     lookRef.current.copy(pose.look);
     camera.position.copy(pose.camera);
     camera.lookAt(pose.look);
-    applyCameraComposition(camera, container, true);
+    applyCameraComposition(camera, container, shouldUseSceneCameraComposition());
     controls.target.copy(pose.look);
     controls.update();
     writeHomeSceneCameraData(container, camera, pose.look);
 
     return true;
-  }, [homeSceneCameraPose, selectedHomeScene]);
+  }, [homeSceneCameraPose, selectedHomeScene, shouldUseSceneCameraComposition]);
 
   useEffect(() => {
     introPhaseRef.current = introPhase;
@@ -2687,6 +2696,10 @@ export default function BikeScene({
   }, [selectedHomeScene]);
 
   useEffect(() => {
+    homeSceneCameraPoseRef.current = homeSceneCameraPose;
+  }, [homeSceneCameraPose]);
+
+  useEffect(() => {
     const refreshComposition = () => {
       const camera = cameraRef.current;
       const container = containerRef.current;
@@ -2695,7 +2708,7 @@ export default function BikeScene({
         return;
       }
 
-      applyCameraComposition(camera, container, Boolean(selectedHomeScene));
+      applyCameraComposition(camera, container, shouldUseSceneCameraComposition());
       queueCameraCompositionRefresh(180);
       controlsRef.current?.update();
     };
@@ -2720,6 +2733,7 @@ export default function BikeScene({
     selectedHomeLampSize,
     selectedLampHeight,
     selectedLampProduct,
+    shouldUseSceneCameraComposition,
   ]);
 
   useEffect(() => {
@@ -3212,7 +3226,7 @@ export default function BikeScene({
       );
       camera.fov = clientWidth < 560 ? Math.max(viewerSettingsRef.current.cameraFov, 40) : viewerSettingsRef.current.cameraFov;
       camera.aspect = clientWidth / Math.max(clientHeight, 1);
-      applyCameraComposition(camera, container, Boolean(selectedHomeSceneRef.current));
+      applyCameraComposition(camera, container, shouldUseSceneCameraComposition());
       queueCameraCompositionRefresh(180);
       applyDepthOfFieldPassSettings(
         depthOfFieldPass,
@@ -3296,7 +3310,7 @@ export default function BikeScene({
 
       if (activeCamera) {
         if (compositionRefreshFramesRef.current > 0) {
-          applyCameraComposition(activeCamera, container, Boolean(selectedHomeSceneRef.current));
+          applyCameraComposition(activeCamera, container, shouldUseSceneCameraComposition());
           compositionRefreshFramesRef.current -= 1;
         }
 
@@ -3435,7 +3449,7 @@ export default function BikeScene({
       container.removeChild(renderer.domElement);
       scene.clear();
     };
-  }, []);
+  }, [queueCameraCompositionRefresh, shouldUseSceneCameraComposition]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -3525,10 +3539,15 @@ export default function BikeScene({
       container.dataset.homeScene = `${selectedHomeScene}-hdri-dome`;
       container.dataset.viewerModel = selectedHomeScene;
       container.dataset.homeSceneCameraReset = "loaded";
-      setHomeSceneVersion((current) => current + 1);
+      const versionTimer = window.setTimeout(() => {
+        if (homeSceneRef.current === homeScene) {
+          setHomeSceneVersion((current) => current + 1);
+        }
+      }, 0);
       onSceneReadyRef.current();
 
       return () => {
+        window.clearTimeout(versionTimer);
         if (homeSceneRef.current === homeScene) {
           scene.remove(homeScene);
           disposeObject(homeScene);
@@ -3640,13 +3659,16 @@ export default function BikeScene({
           disposeObject(homeSceneCornerLampRef.current);
         }
 
-        const floorY = getHomeSceneCornerLampFloorY(homeScene);
-        const cornerLamp = prepareHomeSceneCornerLampModel(
+        const preparedLamp = isHdriDomeHomeScene(homeScene)
+          ? prepareProductModelForViewport(gltf.scene, anisotropyRef.current)
+          : null;
+        const cornerLamp = preparedLamp?.group ?? prepareHomeSceneCornerLampModel(
           gltf.scene,
           anisotropyRef.current,
-          floorY,
+          getHomeSceneCornerLampFloorY(homeScene),
           activeLampModelName,
         );
+        cornerLamp.name = activeLampModelName;
         homeSceneCornerLampRef.current = cornerLamp;
         scene.add(cornerLamp);
         modelLoadedRef.current = true;
@@ -3675,6 +3697,25 @@ export default function BikeScene({
         container.dataset.emissionSlot = lampEmissionMaterialsRef.current.length
           ? lampEmissionMaterialsRef.current.map((material) => material.name).join(",")
           : "missing";
+        if (preparedLamp && !homeSceneCameraPoseRef.current) {
+          assetCameraRef.current = {
+            camera: preparedLamp.camera.clone(),
+            look: preparedLamp.look.clone(),
+          };
+          targetCameraRef.current.copy(preparedLamp.camera);
+          targetLookRef.current.copy(preparedLamp.look);
+          lookRef.current.copy(preparedLamp.look);
+
+          if (cameraRef.current && controlsRef.current) {
+            cameraRef.current.position.copy(preparedLamp.camera);
+            cameraRef.current.lookAt(preparedLamp.look);
+            controlsRef.current.target.copy(preparedLamp.look);
+            controlsRef.current.update();
+            applyCameraComposition(cameraRef.current, container, false);
+            queueCameraCompositionRefresh(180);
+            writeHomeSceneCameraData(container, cameraRef.current, preparedLamp.look);
+          }
+        }
         onSceneReadyRef.current();
       },
       undefined,
@@ -3692,6 +3733,7 @@ export default function BikeScene({
     };
   }, [
     homeSceneVersion,
+    queueCameraCompositionRefresh,
     selectedHomeLampSize,
     selectedHomeScene,
     selectedLampHeight,
@@ -3918,7 +3960,14 @@ export default function BikeScene({
       cancelled = true;
       dracoLoader.dispose();
     };
-  }, [config.size, selectedHomeScene, selectedLampHeight, selectedLampProduct, showLampModel]);
+  }, [
+    config.size,
+    queueCameraCompositionRefresh,
+    selectedHomeScene,
+    selectedLampHeight,
+    selectedLampProduct,
+    showLampModel,
+  ]);
 
   useEffect(() => {
     componentOptionsRef.current = config.components;
@@ -4296,13 +4345,24 @@ export default function BikeScene({
     if (cameraRef.current) {
       cameraRef.current.fov = viewerSettings.cameraFov;
       if (containerRef.current) {
-        applyCameraComposition(cameraRef.current, containerRef.current, isHomeSceneActive);
+        applyCameraComposition(
+          cameraRef.current,
+          containerRef.current,
+          shouldUseSceneCameraComposition(),
+        );
         queueCameraCompositionRefresh(180);
       } else {
         cameraRef.current.updateProjectionMatrix();
       }
     }
-  }, [backgroundMode, hdriAsset, queueCameraCompositionRefresh, selectedHomeScene, viewerSettings]);
+  }, [
+    backgroundMode,
+    hdriAsset,
+    queueCameraCompositionRefresh,
+    selectedHomeScene,
+    shouldUseSceneCameraComposition,
+    viewerSettings,
+  ]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -4332,7 +4392,7 @@ export default function BikeScene({
           applyCameraComposition(
             cameraRef.current,
             containerRef.current,
-            Boolean(selectedHomeSceneRef.current),
+            shouldUseSceneCameraComposition(),
           );
           queueCameraCompositionRefresh(180);
         }
@@ -4369,13 +4429,13 @@ export default function BikeScene({
         applyCameraComposition(
           cameraRef.current,
           containerRef.current,
-          Boolean(selectedHomeSceneRef.current),
+          shouldUseSceneCameraComposition(),
         );
         queueCameraCompositionRefresh(180);
       }
       controlsRef.current.update();
     }
-  }, [focus, queueCameraCompositionRefresh]);
+  }, [focus, queueCameraCompositionRefresh, shouldUseSceneCameraComposition]);
 
   return (
     <div

@@ -812,86 +812,19 @@ button {
   white-space: nowrap;
 }
 
-.home-render-controls,
-.home-camera-controls {
+.home-render-controls {
   display: grid;
   gap: 10px;
   margin-top: 4px;
 }
 
-.home-render-controls .section-title,
-.home-camera-controls .section-title {
+.home-render-controls .section-title {
   margin-bottom: 0;
 }
 
 .home-render-controls .studio-group,
 .home-render-controls .studio-select-row {
   min-width: 0;
-}
-
-.home-camera-grid {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.home-camera-button {
-  align-items: center;
-  aspect-ratio: 1.2;
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px solid rgba(16, 24, 33, 0.1);
-  border-radius: 8px;
-  color: var(--ink);
-  cursor: pointer;
-  display: flex;
-  font-size: 17px;
-  font-weight: 800;
-  justify-content: center;
-  min-height: 42px;
-}
-
-.home-camera-button:hover,
-.home-camera-button:focus-visible {
-  border-color: rgba(47, 131, 200, 0.52);
-  box-shadow: inset 0 0 0 1px rgba(47, 131, 200, 0.18);
-  outline: none;
-}
-
-.home-camera-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.home-camera-save,
-.home-camera-reset {
-  border-radius: 8px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 800;
-  min-height: 44px;
-  padding: 0 14px;
-}
-
-.home-camera-save {
-  background: var(--ink);
-  border: 1px solid var(--ink);
-  color: #fff;
-}
-
-.home-camera-reset {
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px solid rgba(16, 24, 33, 0.12);
-  color: var(--ink);
-}
-
-.home-camera-save:hover,
-.home-camera-save:focus-visible,
-.home-camera-reset:hover,
-.home-camera-reset:focus-visible {
-  border-color: rgba(47, 131, 200, 0.52);
-  outline: none;
 }
 
 .build-card strong,
